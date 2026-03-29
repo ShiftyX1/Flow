@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelWorld" inherits="Node3D" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Node for generating infinite voxel terrain.
+	</brief_description>
+	<description>
+		VoxelWorld generates an infinite procedural voxel terrain similar to Minecraft. The terrain is generated at runtime using Perlin noise and consists of colored blocks (no textures).
+		The world is divided into chunks (16x64x16 blocks each) that are loaded and unloaded dynamically based on the active camera's position and the configured [member chunk_load_radius].
+		[b]Note:[/b] Terrain generation only occurs at runtime. In the editor, VoxelWorld appears as an empty node with configurable properties. Set [member seed] to -1 for random terrain each run, or to a specific value for reproducible worlds.
+	</description>
+	<tutorials>
+	</tutorials>
+	<members>
+		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="-1">
+			The seed used for terrain generation. Set to [code]-1[/code] for a random seed each time the game runs, or to a specific positive integer for reproducible terrain.
+		</member>
+		<member name="chunk_load_radius" type="int" setter="set_chunk_load_radius" getter="get_chunk_load_radius" default="8">
+			The radius (in chunks) around the camera within which terrain chunks are loaded. Higher values show more terrain but use more memory and processing time. Valid range: 2 to 16.
+		</member>
+		<member name="block_size" type="float" setter="set_block_size" getter="get_block_size" default="1.0">
+			The world-space size of each voxel block. Default is 1.0 (1 meter per block).
+		</member>
+		<member name="sea_level" type="int" setter="set_sea_level" getter="get_sea_level" default="20">
+			The Y-level at which water generates. Blocks below this level that are not solid terrain will be filled with water. Valid range: 0 to 63.
+		</member>
+	</members>
+</class>

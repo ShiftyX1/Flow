@@ -12,3 +12,16 @@ const Color VoxelBlockData::block_colors[VOXEL_BLOCK_TYPE_MAX] = {
 	Color(0.16f, 0.38f, 0.14f),     // LEAVES (dark green)
 	Color(0.20f, 0.20f, 0.20f),     // BEDROCK (dark gray)
 };
+
+const char *VoxelBlockData::block_names[VOXEL_BLOCK_TYPE_MAX] = {
+	"Air",
+	"Grass",
+	"Dirt",
+	"Stone",
+	"Sand",
+	"Water",
+	"Snow",
+	"Wood",
+	"Leaves",
+	"Bedrock",
+};

@@ -1,15 +1,63 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class name="VoxelWorld" inherits="Node3D" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
 	<brief_description>
-		Node for generating infinite voxel terrain.
+		Node for generating infinite voxel terrain with block interaction API.
 	</brief_description>
 	<description>
-		VoxelWorld generates an infinite procedural voxel terrain similar to Minecraft. The terrain is generated at runtime using Perlin noise and consists of colored blocks (no textures).
+		VoxelWorld generates an infinite procedural voxel terrain similar to Minecraft. The terrain is generated at runtime using Perlin noise and consists of colored blocks.
 		The world is divided into chunks (16x64x16 blocks each) that are loaded and unloaded dynamically based on the active camera's position and the configured [member chunk_load_radius].
-		[b]Note:[/b] Terrain generation only occurs at runtime. In the editor, VoxelWorld appears as an empty node with configurable properties. Set [member seed] to -1 for random terrain each run, or to a specific value for reproducible worlds.
+		Use [member block_registry] to customize block types, colors, and textures. If no registry is assigned, a default one is created with 10 built-in block types.
+		The block interaction API ([method get_block_at], [method set_block_at], [method raycast_block]) allows GDScript to read, modify, and raycast against the voxel world.
 	</description>
 	<tutorials>
 	</tutorials>
+	<methods>
+		<method name="get_block_at" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="world_pos" type="Vector3" />
+			<description>
+				Returns the block ID at the given world position. Returns 0 (Air) if the chunk is not loaded.
+			</description>
+		</method>
+		<method name="set_block_at">
+			<return type="void" />
+			<param index="0" name="world_pos" type="Vector3" />
+			<param index="1" name="block_id" type="int" />
+			<description>
+				Sets the block at the given world position and rebuilds the chunk mesh. Emits [signal block_placed] or [signal block_broken] as appropriate.
+			</description>
+		</method>
+		<method name="get_block_name_at" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="world_pos" type="Vector3" />
+			<description>
+				Returns the name of the block at the given world position from the block registry.
+			</description>
+		</method>
+		<method name="world_to_block_pos" qualifiers="const">
+			<return type="Vector3i" />
+			<param index="0" name="world_pos" type="Vector3" />
+			<description>
+				Converts a world position to a block grid position.
+			</description>
+		</method>
+		<method name="block_to_world_pos" qualifiers="const">
+			<return type="Vector3i" />
+			<param index="0" name="block_pos" type="Vector3i" />
+			<description>
+				Converts a block grid position to a world position (center of the block).
+			</description>
+		</method>
+		<method name="raycast_block" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="origin" type="Vector3" />
+			<param index="1" name="direction" type="Vector3" />
+			<param index="2" name="max_distance" type="float" default="10.0" />
+			<description>
+				Performs a voxel raycast from [param origin] in [param direction]. Returns a Dictionary with keys "position" (Vector3), "normal" (Vector3), "block_id" (int), and "block_pos" (Vector3i) if a solid block is hit, or an empty Dictionary if nothing is hit.
+			</description>
+		</method>
+	</methods>
 	<members>
 		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="-1">
 			The seed used for terrain generation. Set to [code]-1[/code] for a random seed each time the game runs, or to a specific positive integer for reproducible terrain.
@@ -23,5 +71,24 @@
 		<member name="sea_level" type="int" setter="set_sea_level" getter="get_sea_level" default="20">
 			The Y-level at which water generates. Blocks below this level that are not solid terrain will be filled with water. Valid range: 0 to 63.
 		</member>
+		<member name="block_registry" type="VoxelBlockRegistry" setter="set_block_registry" getter="get_block_registry">
+			The block registry resource that defines block types, colors, and textures. If not set, a default registry with 10 built-in block types is created automatically.
+		</member>
 	</members>
+	<signals>
+		<signal name="block_placed">
+			<param index="0" name="block_pos" type="Vector3i" />
+			<param index="1" name="block_id" type="int" />
+			<description>
+				Emitted when a block is placed via [method set_block_at].
+			</description>
+		</signal>
+		<signal name="block_broken">
+			<param index="0" name="block_pos" type="Vector3i" />
+			<param index="1" name="old_block_id" type="int" />
+			<description>
+				Emitted when a block is broken (set to Air) via [method set_block_at].
+			</description>
+		</signal>
+	</signals>
 </class>

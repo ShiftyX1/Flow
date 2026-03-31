@@ -1,6 +1,7 @@
 #pragma once
 
 #include "voxel_block_data.h"
+#include "voxel_block_registry.h"
 #include "voxel_terrain_generator.h"
 
 #include "core/math/vector2i.h"
@@ -33,7 +34,8 @@ public:
 	VoxelBlockType get_block(int p_x, int p_y, int p_z) const;
 	void set_block(int p_x, int p_y, int p_z, VoxelBlockType p_type);
 
-	MeshInstance3D *build_mesh(float p_block_size, const Ref<Material> &p_material);
+	MeshInstance3D *build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry = Ref<VoxelBlockRegistry>());
+	void rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry = Ref<VoxelBlockRegistry>());
 
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance; }
 };

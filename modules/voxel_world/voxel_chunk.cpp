@@ -21,8 +21,8 @@ void VoxelChunk::set_block(int p_x, int p_y, int p_z, VoxelBlockType p_type) {
 	blocks.write[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)] = (uint8_t)p_type;
 }
 
-MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material) {
-	Array arrays = VoxelMesher::build_chunk_mesh(blocks, p_block_size);
+MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry) {
+	Array arrays = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
 
 	if (arrays.size() == 0) {
 		return nullptr;
@@ -43,4 +43,27 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 	mesh_instance->set_position(Vector3(world_x, 0, world_z));
 
 	return mesh_instance;
+}
+
+void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry) {
+	Array arrays = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
+
+	if (!mesh_instance) {
+		return;
+	}
+
+	if (arrays.size() == 0) {
+		mesh_instance->set_mesh(Ref<Mesh>());
+		array_mesh.unref();
+		return;
+	}
+
+	array_mesh.instantiate();
+	array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+
+	if (p_material.is_valid()) {
+		array_mesh->surface_set_material(0, p_material);
+	}
+
+	mesh_instance->set_mesh(array_mesh);
 }

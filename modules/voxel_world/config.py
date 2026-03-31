@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["VoxelWorld"]
+    return ["VoxelWorld", "VoxelBlockRegistry"]
 
 
 def get_doc_path():

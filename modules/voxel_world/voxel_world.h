@@ -1,5 +1,6 @@
 #pragma once
 
+#include "voxel_block_registry.h"
 #include "voxel_chunk.h"
 #include "voxel_terrain_generator.h"
 
@@ -15,6 +16,8 @@ class VoxelWorld : public Node3D {
 	float block_size = 1.0f;
 	int sea_level = 20;
 
+	Ref<VoxelBlockRegistry> block_registry;
+
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
 	Ref<StandardMaterial3D> material;
@@ -27,6 +30,10 @@ class VoxelWorld : public Node3D {
 	void _update_chunks(const Vector3 &p_camera_pos);
 	void _load_chunk(int p_cx, int p_cz);
 	void _unload_chunk(int p_cx, int p_cz);
+
+	// Helpers for coordinate conversion.
+	Vector2i _world_to_chunk(const Vector3 &p_world_pos) const;
+	Vector3i _world_to_local_block(const Vector3 &p_world_pos) const;
 
 protected:
 	void _notification(int p_what);
@@ -44,6 +51,26 @@ public:
 
 	void set_sea_level(int p_level);
 	int get_sea_level() const { return sea_level; }
+
+	void set_block_registry(const Ref<VoxelBlockRegistry> &p_registry);
+	Ref<VoxelBlockRegistry> get_block_registry() const;
+
+	// --- Block interaction API (exposed to GDScript) ---
+
+	// Get/set blocks by world position.
+	int get_block_at(const Vector3 &p_world_pos) const;
+	void set_block_at(const Vector3 &p_world_pos, int p_block_id);
+
+	// Get block name by world position.
+	String get_block_name_at(const Vector3 &p_world_pos) const;
+
+	// Convert world position to block grid position.
+	Vector3i world_to_block_pos(const Vector3 &p_world_pos) const;
+	Vector3 block_to_world_pos(const Vector3i &p_block_pos) const;
+
+	// Simple voxel raycast. Returns Dictionary with "position", "normal", "block_id",
+	// "block_pos" keys, or empty Dictionary if nothing hit.
+	Dictionary raycast_block(const Vector3 &p_origin, const Vector3 &p_direction, float p_max_distance = 10.0f) const;
 
 	VoxelWorld();
 	~VoxelWorld();

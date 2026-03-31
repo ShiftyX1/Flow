@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelBlockRegistry" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Resource that assigns textures to engine-defined block types for [VoxelWorld].
+	</brief_description>
+	<description>
+		A texture registry used by [VoxelWorld]. Each block type is defined at the engine level (in VoxelBlockData) with its name, color, solidity, and transparency. This resource allows assigning per-face textures (top, side, bottom) to those block types from the editor.
+		When no registry is assigned to a [VoxelWorld], one is created automatically with entries for all built-in block types (no textures assigned, vertex colors used).
+	</description>
+	<methods>
+		<method name="create_block">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Creates a new texture entry for the given block ID. Does nothing if the entry already exists.
+			</description>
+		</method>
+		<method name="remove_block">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Removes the texture entry for the given block ID.
+			</description>
+		</method>
+		<method name="has_block" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if a texture entry with the given block ID exists.
+			</description>
+		</method>
+		<method name="get_block_list" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns an array of all registered block IDs.
+			</description>
+		</method>
+		<method name="get_block_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered block entries.
+			</description>
+		</method>
+		<method name="set_block_texture_top">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="texture" type="Texture2D" />
+			<description>
+				Sets the texture for the top face (+Y) of the block.
+			</description>
+		</method>
+		<method name="get_block_texture_top" qualifiers="const">
+			<return type="Texture2D" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the texture assigned to the top face of the block.
+			</description>
+		</method>
+		<method name="set_block_texture_side">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="texture" type="Texture2D" />
+			<description>
+				Sets the texture for the side faces of the block.
+			</description>
+		</method>
+		<method name="get_block_texture_side" qualifiers="const">
+			<return type="Texture2D" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the texture assigned to the side faces of the block.
+			</description>
+		</method>
+		<method name="set_block_texture_bottom">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="texture" type="Texture2D" />
+			<description>
+				Sets the texture for the bottom face (-Y) of the block.
+			</description>
+		</method>
+		<method name="get_block_texture_bottom" qualifiers="const">
+			<return type="Texture2D" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the texture assigned to the bottom face of the block.
+			</description>
+		</method>
+		<method name="block_has_texture" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if the block has any texture assigned (top, side, or bottom).
+			</description>
+		</method>
+		<method name="setup_defaults">
+			<return type="void" />
+			<description>
+				Populates the registry with entries for all built-in block types (Air, Grass, Dirt, Stone, Sand, Water, Snow, Wood, Leaves, Bedrock). No textures are assigned; blocks will use engine-defined vertex colors by default.
+			</description>
+		</method>
+	</methods>
+</class>

@@ -22,17 +22,24 @@ void VoxelChunk::set_block(int p_x, int p_y, int p_z, VoxelBlockType p_type) {
 }
 
 MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry) {
-	Array arrays = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
 
-	if (arrays.size() == 0) {
+	if (surfaces.size() == 0) {
 		return nullptr;
 	}
 
 	array_mesh.instantiate();
-	array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-
-	if (p_material.is_valid()) {
-		array_mesh->surface_set_material(0, p_material);
+	for (int i = 0; i < surfaces.size(); i++) {
+		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, surfaces[i].arrays);
+		if (surfaces[i].texture.is_valid()) {
+			Ref<StandardMaterial3D> mat;
+			mat.instantiate();
+			mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, surfaces[i].texture);
+			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+			array_mesh->surface_set_material(i, mat);
+		} else if (p_material.is_valid()) {
+			array_mesh->surface_set_material(i, p_material);
+		}
 	}
 
 	mesh_instance = memnew(MeshInstance3D);
@@ -46,23 +53,30 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 }
 
 void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry) {
-	Array arrays = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
 
 	if (!mesh_instance) {
 		return;
 	}
 
-	if (arrays.size() == 0) {
+	if (surfaces.size() == 0) {
 		mesh_instance->set_mesh(Ref<Mesh>());
 		array_mesh.unref();
 		return;
 	}
 
 	array_mesh.instantiate();
-	array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-
-	if (p_material.is_valid()) {
-		array_mesh->surface_set_material(0, p_material);
+	for (int i = 0; i < surfaces.size(); i++) {
+		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, surfaces[i].arrays);
+		if (surfaces[i].texture.is_valid()) {
+			Ref<StandardMaterial3D> mat;
+			mat.instantiate();
+			mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, surfaces[i].texture);
+			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+			array_mesh->surface_set_material(i, mat);
+		} else if (p_material.is_valid()) {
+			array_mesh->surface_set_material(i, p_material);
+		}
 	}
 
 	mesh_instance->set_mesh(array_mesh);

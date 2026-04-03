@@ -170,31 +170,13 @@ Ref<Texture2D> VoxelBlockRegistry::get_block_texture_for_face(int p_id, const Ve
 
 	if (p_normal.y > 0.5f) {
 		// Top face.
-		if (entry.texture_top.is_valid()) {
-			return entry.texture_top;
-		}
-		if (entry.texture_side.is_valid()) {
-			return entry.texture_side;
-		}
+		return entry.texture_top;
 	} else if (p_normal.y < -0.5f) {
 		// Bottom face.
-		if (entry.texture_bottom.is_valid()) {
-			return entry.texture_bottom;
-		}
-		if (entry.texture_top.is_valid()) {
-			return entry.texture_top;
-		}
-		if (entry.texture_side.is_valid()) {
-			return entry.texture_side;
-		}
+		return entry.texture_bottom;
 	} else {
 		// Side face.
-		if (entry.texture_side.is_valid()) {
-			return entry.texture_side;
-		}
-		if (entry.texture_top.is_valid()) {
-			return entry.texture_top;
-		}
+		return entry.texture_side;
 	}
 	return Ref<Texture2D>();
 }

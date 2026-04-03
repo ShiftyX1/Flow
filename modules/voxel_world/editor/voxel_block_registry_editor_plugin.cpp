@@ -22,11 +22,19 @@ VoxelBlockRegistryEditorDialog::VoxelBlockRegistryEditorDialog() {
 	set_title("Voxel Block Registry — Texture Editor");
 	set_min_size(Size2(700 * EDSCALE, 500 * EDSCALE));
 
+	// Hide the built-in message label so only our content shows.
+	get_label()->hide();
+
+	VBoxContainer *main_vbox = memnew(VBoxContainer);
+	main_vbox->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	main_vbox->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	add_child(main_vbox);
+
 	scroll = memnew(ScrollContainer);
 	scroll->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	scroll->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
-	add_child(scroll);
+	main_vbox->add_child(scroll);
 
 	block_list_vbox = memnew(VBoxContainer);
 	block_list_vbox->set_h_size_flags(Control::SIZE_EXPAND_FILL);
@@ -81,20 +89,15 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 		return;
 	}
 
-	PackedInt32Array ids = registry->get_block_list();
-	Vector<int> sorted_ids;
-	for (int i = 0; i < ids.size(); i++) {
-		sorted_ids.push_back(ids[i]);
-	}
-	sorted_ids.sort();
-
-	for (int i = 0; i < sorted_ids.size(); i++) {
-		int block_id = sorted_ids[i];
-
-		// Skip AIR.
-		if (block_id == 0) {
-			continue;
+	// Ensure all engine-defined block types have entries in the registry.
+	for (int i = 0; i < VOXEL_BLOCK_TYPE_MAX; i++) {
+		if (!registry->has_block(i)) {
+			registry->create_block(i);
 		}
+	}
+
+	// Always show all engine-defined block types (skip AIR=0).
+	for (int block_id = 1; block_id < VOXEL_BLOCK_TYPE_MAX; block_id++) {
 
 		// --- Block header: color swatch + name ---
 		HBoxContainer *header = memnew(HBoxContainer);

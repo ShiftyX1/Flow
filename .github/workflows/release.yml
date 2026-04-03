@@ -1,0 +1,89 @@
+name: 🚀 Release
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0). Leave empty to use latest commit."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Build all platforms ─────────────────────────────────────────────
+
+  windows-build:
+    name: 🏁 Windows
+    uses: ./.github/workflows/windows_builds.yml
+
+  linux-build:
+    name: 🐧 Linux
+    uses: ./.github/workflows/linux_builds.yml
+
+  macos-build:
+    name: 🍎 macOS
+    uses: ./.github/workflows/macos_builds.yml
+
+  web-build:
+    name: 🌐 Web
+    uses: ./.github/workflows/web_builds.yml
+
+  # ── Create GitHub Release ───────────────────────────────────────────
+
+  release:
+    name: 📦 Publish Release
+    needs: [windows-build, linux-build, macos-build, web-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Determine tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      - name: Organise artifacts
+        run: |
+          mkdir -p dist
+          echo "## Artifacts found:" >> "$GITHUB_STEP_SUMMARY"
+          for dir in release-artifacts/*/; do
+            platform="$(basename "$dir")"
+            echo "- **$platform**" >> "$GITHUB_STEP_SUMMARY"
+            for f in "$dir"*; do
+              [ -f "$f" ] && cp "$f" "dist/${platform}__$(basename "$f")"
+            done
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Files to upload:" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh dist/ >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: "Flow ${{ steps.tag.outputs.name }}"
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ inputs.prerelease || false }}
+          files: dist/*
+          fail_on_unmatched_files: false

@@ -5,7 +5,8 @@ void VoxelMesher::add_face(
 		const Vector3 &p_v0, const Vector3 &p_v1, const Vector3 &p_v2, const Vector3 &p_v3,
 		const Vector3 &p_normal,
 		const Color &p_color,
-		bool p_has_uv) {
+		bool p_has_uv,
+		bool p_flip_v) {
 	// CCW winding: tri1 = v0,v2,v1 ; tri2 = v0,v3,v2
 	r_surface.vertices.push_back(p_v0);
 	r_surface.vertices.push_back(p_v2);
@@ -21,12 +22,22 @@ void VoxelMesher::add_face(
 
 	if (p_has_uv) {
 		r_surface.has_uv = true;
-		r_surface.uvs.push_back(Vector2(0, 0));
-		r_surface.uvs.push_back(Vector2(1, 1));
-		r_surface.uvs.push_back(Vector2(0, 1));
-		r_surface.uvs.push_back(Vector2(0, 0));
-		r_surface.uvs.push_back(Vector2(1, 0));
-		r_surface.uvs.push_back(Vector2(1, 1));
+		if (p_flip_v) {
+			// Flipped V for side faces: bottom vertices get V=1, top get V=0.
+			r_surface.uvs.push_back(Vector2(0, 1));
+			r_surface.uvs.push_back(Vector2(1, 0));
+			r_surface.uvs.push_back(Vector2(0, 0));
+			r_surface.uvs.push_back(Vector2(0, 1));
+			r_surface.uvs.push_back(Vector2(1, 1));
+			r_surface.uvs.push_back(Vector2(1, 0));
+		} else {
+			r_surface.uvs.push_back(Vector2(0, 0));
+			r_surface.uvs.push_back(Vector2(1, 1));
+			r_surface.uvs.push_back(Vector2(0, 1));
+			r_surface.uvs.push_back(Vector2(0, 0));
+			r_surface.uvs.push_back(Vector2(1, 0));
+			r_surface.uvs.push_back(Vector2(1, 1));
+		}
 	} else {
 		r_surface.uvs.push_back(Vector2(0, 0));
 		r_surface.uvs.push_back(Vector2(0, 0));
@@ -99,7 +110,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 							origin + Vector3(bs, bs, 0),
 							origin + Vector3(bs, bs, bs),
 							origin + Vector3(bs, 0, bs),
-							Vector3(1, 0, 0), get_face_color(tex_side), tex_side.is_valid());
+							Vector3(1, 0, 0), get_face_color(tex_side), tex_side.is_valid(), true);
 				}
 				// -X face (side)
 				if (is_neighbor_transparent(x - 1, y, z)) {
@@ -108,7 +119,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 							origin + Vector3(0, bs, bs),
 							origin + Vector3(0, bs, 0),
 							origin + Vector3(0, 0, 0),
-							Vector3(-1, 0, 0), get_face_color(tex_side), tex_side.is_valid());
+							Vector3(-1, 0, 0), get_face_color(tex_side), tex_side.is_valid(), true);
 				}
 				// +Y face (top)
 				if (is_neighbor_transparent(x, y + 1, z)) {
@@ -135,7 +146,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 							origin + Vector3(bs, bs, bs),
 							origin + Vector3(0, bs, bs),
 							origin + Vector3(0, 0, bs),
-							Vector3(0, 0, 1), get_face_color(tex_side), tex_side.is_valid());
+							Vector3(0, 0, 1), get_face_color(tex_side), tex_side.is_valid(), true);
 				}
 				// -Z face (side)
 				if (is_neighbor_transparent(x, y, z - 1)) {
@@ -144,7 +155,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 							origin + Vector3(0, bs, 0),
 							origin + Vector3(bs, bs, 0),
 							origin + Vector3(bs, 0, 0),
-							Vector3(0, 0, -1), get_face_color(tex_side), tex_side.is_valid());
+							Vector3(0, 0, -1), get_face_color(tex_side), tex_side.is_valid(), true);
 				}
 			}
 		}

@@ -44,5 +44,6 @@ private:
 			const Vector3 &p_v0, const Vector3 &p_v1, const Vector3 &p_v2, const Vector3 &p_v3,
 			const Vector3 &p_normal,
 			const Color &p_color,
-			bool p_has_uv);
+			bool p_has_uv,
+			bool p_flip_v = false);
 };

@@ -15,6 +15,7 @@ class VoxelWorld : public Node3D {
 	int chunk_load_radius = 8;
 	float block_size = 1.0f;
 	int sea_level = 20;
+	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 
 	Ref<VoxelBlockRegistry> block_registry;
 
@@ -51,6 +52,9 @@ public:
 
 	void set_sea_level(int p_level);
 	int get_sea_level() const { return sea_level; }
+
+	void set_texture_filter(BaseMaterial3D::TextureFilter p_filter);
+	BaseMaterial3D::TextureFilter get_texture_filter() const { return texture_filter; }
 
 	void set_block_registry(const Ref<VoxelBlockRegistry> &p_registry);
 	Ref<VoxelBlockRegistry> get_block_registry() const;

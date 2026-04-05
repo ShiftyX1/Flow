@@ -20,6 +20,9 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sea_level", "level"), &VoxelWorld::set_sea_level);
 	ClassDB::bind_method(D_METHOD("get_sea_level"), &VoxelWorld::get_sea_level);
 
+	ClassDB::bind_method(D_METHOD("set_texture_filter", "filter"), &VoxelWorld::set_texture_filter);
+	ClassDB::bind_method(D_METHOD("get_texture_filter"), &VoxelWorld::get_texture_filter);
+
 	ClassDB::bind_method(D_METHOD("set_block_registry", "registry"), &VoxelWorld::set_block_registry);
 	ClassDB::bind_method(D_METHOD("get_block_registry"), &VoxelWorld::get_block_registry);
 
@@ -34,6 +37,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_load_radius", PROPERTY_HINT_RANGE, "2,16,1"), "set_chunk_load_radius", "get_chunk_load_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "block_size", PROPERTY_HINT_RANGE, "0.1,10.0,0.1"), "set_block_size", "get_block_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sea_level", PROPERTY_HINT_RANGE, "0,63,1"), "set_sea_level", "get_sea_level");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
@@ -61,6 +65,10 @@ void VoxelWorld::set_block_size(float p_size) {
 
 void VoxelWorld::set_sea_level(int p_level) {
 	sea_level = CLAMP(p_level, 0, VoxelTerrainGenerator::CHUNK_SIZE_Y - 1);
+}
+
+void VoxelWorld::set_texture_filter(BaseMaterial3D::TextureFilter p_filter) {
+	texture_filter = p_filter;
 }
 
 void VoxelWorld::set_block_registry(const Ref<VoxelBlockRegistry> &p_registry) {
@@ -133,6 +141,7 @@ void VoxelWorld::_initialize_world() {
 	material.instantiate();
 	material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 	material->set_shading_mode(BaseMaterial3D::SHADING_MODE_PER_PIXEL);
+	material->set_texture_filter(texture_filter);
 
 	initialized = true;
 
@@ -222,7 +231,7 @@ void VoxelWorld::_load_chunk(int p_cx, int p_cz) {
 	Vector<uint8_t> blocks = generator->generate_chunk_data(p_cx, p_cz);
 	chunk->set_blocks(blocks);
 
-	MeshInstance3D *mi = chunk->build_mesh(block_size, material, block_registry);
+	MeshInstance3D *mi = chunk->build_mesh(block_size, material, block_registry, texture_filter);
 	if (mi) {
 		add_child(mi);
 		mi->set_owner(nullptr);
@@ -310,7 +319,7 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 	chunk->set_block(local.x, local.y, local.z, (VoxelBlockType)p_block_id);
 
 	// Rebuild the chunk mesh.
-	chunk->rebuild_mesh(block_size, material, block_registry);
+	chunk->rebuild_mesh(block_size, material, block_registry, texture_filter);
 
 	Vector3i block_pos = world_to_block_pos(p_world_pos);
 

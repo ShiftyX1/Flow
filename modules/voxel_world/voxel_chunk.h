@@ -38,4 +38,5 @@ public:
 	void rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry = Ref<VoxelBlockRegistry>(), BaseMaterial3D::TextureFilter p_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST);
 
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance; }
+	void set_mesh_instance(MeshInstance3D *p_mi) { mesh_instance = p_mi; }
 };

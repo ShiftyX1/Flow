@@ -2,8 +2,10 @@
 
 #include "voxel_block_registry.h"
 #include "voxel_chunk.h"
+#include "voxel_mesher.h"
 #include "voxel_terrain_generator.h"
 
+#include "core/os/mutex.h"
 #include "core/templates/hash_map.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/material.h"
@@ -15,6 +17,7 @@ class VoxelWorld : public Node3D {
 	int chunk_load_radius = 8;
 	float block_size = 1.0f;
 	int sea_level = 20;
+	int chunks_per_frame = 4; // Max chunks to integrate into scene tree per frame.
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 
 	Ref<VoxelBlockRegistry> block_registry;
@@ -26,10 +29,37 @@ class VoxelWorld : public Node3D {
 	bool initialized = false;
 	Vector2i last_camera_chunk = Vector2i(INT32_MAX, INT32_MAX);
 
+	// --- Async chunk loading ---
+
+	// Data produced by background thread (no Godot scene API).
+	struct ChunkTaskResult {
+		Vector2i key;
+		Vector<uint8_t> blocks;
+		Vector<VoxelMesher::MeshSurface> surfaces;
+	};
+
+	// Chunks currently being generated on background threads.
+	HashMap<Vector2i, int64_t> pending_chunks; // key -> WorkerThreadPool TaskID
+	// Finished results waiting to be integrated on the main thread.
+	Mutex finished_mutex;
+	Vector<ChunkTaskResult> finished_chunks;
+
+	// Background task entry point (static, thread-safe).
+	struct ChunkTaskData {
+		VoxelWorld *world;
+		Vector2i key;
+		int chunk_x;
+		int chunk_z;
+	};
+	static void _chunk_generation_task(void *p_userdata);
+
+	// Integrate finished chunks into the scene tree (main thread only).
+	void _integrate_finished_chunks();
+
 	void _initialize_world();
 	void _cleanup_world();
 	void _update_chunks(const Vector3 &p_camera_pos);
-	void _load_chunk(int p_cx, int p_cz);
+	void _request_chunk(int p_cx, int p_cz);
 	void _unload_chunk(int p_cx, int p_cz);
 
 	// Helpers for coordinate conversion.

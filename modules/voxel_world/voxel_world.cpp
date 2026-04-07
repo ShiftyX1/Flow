@@ -3,6 +3,7 @@
 #include "core/config/engine.h"
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
+#include "core/object/worker_thread_pool.h"
 #include "core/string/print_string.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/main/viewport.h"
@@ -96,6 +97,8 @@ void VoxelWorld::_notification(int p_what) {
 				return;
 			}
 
+			_integrate_finished_chunks();
+
 			Viewport *vp = get_viewport();
 			if (!vp) {
 				return;
@@ -150,6 +153,16 @@ void VoxelWorld::_initialize_world() {
 }
 
 void VoxelWorld::_cleanup_world() {
+	for (const KeyValue<Vector2i, int64_t> &E : pending_chunks) {
+		WorkerThreadPool::get_singleton()->wait_for_task_completion(E.value);
+	}
+	pending_chunks.clear();
+
+	{
+		MutexLock lock(finished_mutex);
+		finished_chunks.clear();
+	}
+
 	Vector<Vector2i> keys;
 	for (const KeyValue<Vector2i, VoxelChunk *> &E : loaded_chunks) {
 		keys.push_back(E.key);
@@ -207,40 +220,144 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 		_unload_chunk(to_unload[i].x, to_unload[i].y);
 	}
 
-	int loaded_count = 0;
-	for (const KeyValue<Vector2i, bool> &E : desired_chunks) {
-		if (!loaded_chunks.has(E.key)) {
-			_load_chunk(E.key.x, E.key.y);
-			loaded_count++;
+	Vector<Vector2i> pending_to_cancel;
+	for (const KeyValue<Vector2i, int64_t> &E : pending_chunks) {
+		if (!desired_chunks.has(E.key)) {
+			pending_to_cancel.push_back(E.key);
 		}
 	}
-	if (loaded_count > 0) {
-		print_line("[VoxelWorld] Loaded " + itos(loaded_count) + " new chunks. Total loaded: " + itos(loaded_chunks.size()) + ".");
+	for (int i = 0; i < pending_to_cancel.size(); i++) {
+		pending_chunks.erase(pending_to_cancel[i]);
+	}
+
+	int requested_count = 0;
+	for (const KeyValue<Vector2i, bool> &E : desired_chunks) {
+		if (!loaded_chunks.has(E.key) && !pending_chunks.has(E.key)) {
+			_request_chunk(E.key.x, E.key.y);
+			requested_count++;
+		}
+	}
+	if (requested_count > 0) {
+		print_line("[VoxelWorld] Requested " + itos(requested_count) + " chunks for background generation. Pending: " + itos(pending_chunks.size()) + ".");
 	}
 }
 
-void VoxelWorld::_load_chunk(int p_cx, int p_cz) {
+// Background chunk generation
+void VoxelWorld::_chunk_generation_task(void *p_userdata) {
+	ChunkTaskData *data = static_cast<ChunkTaskData *>(p_userdata);
+	VoxelWorld *world = data->world;
+
+	ChunkTaskResult result;
+	result.key = data->key;
+	result.blocks = world->generator->generate_chunk_data(data->chunk_x, data->chunk_z);
+	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry);
+
+	{
+		MutexLock lock(world->finished_mutex);
+		world->finished_chunks.push_back(result);
+	}
+
+	memdelete(data);
+}
+
+void VoxelWorld::_request_chunk(int p_cx, int p_cz) {
 	Vector2i key(p_cx, p_cz);
-	if (loaded_chunks.has(key)) {
+	if (loaded_chunks.has(key) || pending_chunks.has(key)) {
 		return;
 	}
 
-	VoxelChunk *chunk = memnew(VoxelChunk);
-	chunk->set_chunk_pos(key);
+	ChunkTaskData *data = memnew(ChunkTaskData);
+	data->world = this;
+	data->key = key;
+	data->chunk_x = p_cx;
+	data->chunk_z = p_cz;
 
-	Vector<uint8_t> blocks = generator->generate_chunk_data(p_cx, p_cz);
-	chunk->set_blocks(blocks);
+	int64_t task_id = WorkerThreadPool::get_singleton()->add_native_task(
+			&VoxelWorld::_chunk_generation_task, data, false, "VoxelChunkGen");
 
-	MeshInstance3D *mi = chunk->build_mesh(block_size, material, block_registry, texture_filter);
-	if (mi) {
-		add_child(mi);
-		mi->set_owner(nullptr);
-		print_verbose("[VoxelWorld] Chunk (" + itos(p_cx) + ", " + itos(p_cz) + ") mesh built.");
-	} else {
-		print_verbose("[VoxelWorld] Chunk (" + itos(p_cx) + ", " + itos(p_cz) + ") — empty, no mesh.");
+	pending_chunks[key] = task_id;
+}
+
+void VoxelWorld::_integrate_finished_chunks() {
+	Vector<ChunkTaskResult> to_integrate;
+
+	{
+		MutexLock lock(finished_mutex);
+		if (finished_chunks.is_empty()) {
+			return;
+		}
+		to_integrate = finished_chunks;
+		finished_chunks.clear();
 	}
 
-	loaded_chunks[key] = chunk;
+	int integrated = 0;
+	for (int i = 0; i < to_integrate.size(); i++) {
+		const ChunkTaskResult &result = to_integrate[i];
+
+		int64_t *task_id_ptr = pending_chunks.getptr(result.key);
+		if (task_id_ptr) {
+			WorkerThreadPool::get_singleton()->wait_for_task_completion(*task_id_ptr);
+			pending_chunks.erase(result.key);
+		} else {
+			// This chunk was cancelled (camera moved away). Discard it.
+			continue;
+		}
+
+		if (loaded_chunks.has(result.key)) {
+			continue;
+		}
+
+		VoxelChunk *chunk = memnew(VoxelChunk);
+		chunk->set_chunk_pos(result.key);
+		chunk->set_blocks(result.blocks);
+
+		if (result.surfaces.size() > 0) {
+			Ref<ArrayMesh> array_mesh;
+			array_mesh.instantiate();
+
+			for (int s = 0; s < result.surfaces.size(); s++) {
+				array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, result.surfaces[s].arrays);
+				if (result.surfaces[s].texture.is_valid()) {
+					Ref<StandardMaterial3D> mat;
+					mat.instantiate();
+					mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, result.surfaces[s].texture);
+					mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+					mat->set_texture_filter(texture_filter);
+					array_mesh->surface_set_material(s, mat);
+				} else if (material.is_valid()) {
+					array_mesh->surface_set_material(s, material);
+				}
+			}
+
+			MeshInstance3D *mi = memnew(MeshInstance3D);
+			mi->set_mesh(array_mesh);
+
+			float world_x = result.key.x * VoxelChunk::SIZE_X * block_size;
+			float world_z = result.key.y * VoxelChunk::SIZE_Z * block_size;
+			mi->set_position(Vector3(world_x, 0, world_z));
+
+			chunk->set_mesh_instance(mi);
+			add_child(mi);
+			mi->set_owner(nullptr);
+		}
+
+		loaded_chunks[result.key] = chunk;
+		integrated++;
+
+		if (integrated >= chunks_per_frame) {
+			if (i + 1 < to_integrate.size()) {
+				MutexLock lock(finished_mutex);
+				for (int j = i + 1; j < to_integrate.size(); j++) {
+					finished_chunks.push_back(to_integrate[j]);
+				}
+			}
+			break;
+		}
+	}
+
+	if (integrated > 0) {
+		print_verbose("[VoxelWorld] Integrated " + itos(integrated) + " chunks this frame. Total loaded: " + itos(loaded_chunks.size()) + ".");
+	}
 }
 
 void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {

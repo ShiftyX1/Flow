@@ -6,10 +6,7 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/string/print_string.h"
 #include "scene/3d/camera_3d.h"
-#include "scene/3d/physics/collision_shape_3d.h"
-#include "scene/3d/physics/static_body_3d.h"
 #include "scene/main/viewport.h"
-#include "scene/resources/3d/concave_polygon_shape_3d.h"
 
 void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &VoxelWorld::set_seed);
@@ -253,25 +250,6 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 	}
 }
 
-// Extract triangle faces from mesh surface arrays (thread-safe, no scene API).
-PackedVector3Array VoxelWorld::_build_collision_faces(const Vector<VoxelMesher::MeshSurface> &p_surfaces) {
-	PackedVector3Array all_faces;
-	for (int s = 0; s < p_surfaces.size(); s++) {
-		const Array &arrays = p_surfaces[s].arrays;
-		if (arrays.size() <= Mesh::ARRAY_VERTEX) {
-			continue;
-		}
-		PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
-		if (verts.size() == 0) {
-			continue;
-		}
-		int old_size = all_faces.size();
-		all_faces.resize(old_size + verts.size());
-		memcpy(all_faces.ptrw() + old_size, verts.ptr(), verts.size() * sizeof(Vector3));
-	}
-	return all_faces;
-}
-
 // Background chunk generation
 void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	ChunkTaskData *data = static_cast<ChunkTaskData *>(p_userdata);
@@ -281,7 +259,6 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	result.key = data->key;
 	result.blocks = world->generator->generate_chunk_data(data->chunk_x, data->chunk_z);
 	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry);
-	result.collision_faces = _build_collision_faces(result.surfaces);
 
 	{
 		MutexLock lock(world->finished_mutex);
@@ -382,18 +359,6 @@ void VoxelWorld::_integrate_finished_chunks() {
 			chunk->set_mesh_instance(mi);
 			add_child(mi);
 			mi->set_owner(nullptr);
-
-			// Attach prebuilt collision (faces were computed on background thread).
-			if (result.collision_faces.size() > 0) {
-				StaticBody3D *sb = memnew(StaticBody3D);
-				CollisionShape3D *cs = memnew(CollisionShape3D);
-				Ref<ConcavePolygonShape3D> shape;
-				shape.instantiate();
-				shape->set_faces(result.collision_faces);
-				cs->set_shape(shape);
-				sb->add_child(cs);
-				mi->add_child(sb);
-			}
 		}
 
 		loaded_chunks[result.key] = chunk;

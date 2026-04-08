@@ -44,7 +44,6 @@ private:
 		Vector2i key;
 		Vector<uint8_t> blocks;
 		Vector<VoxelMesher::MeshSurface> surfaces;
-		PackedVector3Array collision_faces; // Triangle faces for ConcavePolygonShape3D.
 	};
 
 	// Chunks currently being generated on background threads.
@@ -80,9 +79,6 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Build collision face array from mesh surfaces (thread-safe, no scene API).
-	static PackedVector3Array _build_collision_faces(const Vector<VoxelMesher::MeshSurface> &p_surfaces);
-
 	void set_seed(int p_seed);
 	int get_seed() const { return seed; }
 

@@ -1,5 +1,10 @@
 #include "voxel_chunk.h"
 #include "voxel_mesher.h"
+#include "voxel_world.h"
+
+#include "scene/3d/physics/collision_shape_3d.h"
+#include "scene/3d/physics/static_body_3d.h"
+#include "scene/resources/3d/concave_polygon_shape_3d.h"
 
 VoxelChunk::VoxelChunk() {
 }
@@ -74,6 +79,12 @@ void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_materia
 	if (surfaces.size() == 0) {
 		mesh_instance->set_mesh(Ref<Mesh>());
 		array_mesh.unref();
+		// Remove old collision.
+		for (int c = mesh_instance->get_child_count() - 1; c >= 0; c--) {
+			Node *child = mesh_instance->get_child(c);
+			mesh_instance->remove_child(child);
+			memdelete(child);
+		}
 		return;
 	}
 
@@ -104,4 +115,22 @@ void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_materia
 	}
 
 	mesh_instance->set_mesh(array_mesh);
+
+	// Rebuild collision from updated mesh.
+	for (int c = mesh_instance->get_child_count() - 1; c >= 0; c--) {
+		Node *child = mesh_instance->get_child(c);
+		mesh_instance->remove_child(child);
+		memdelete(child);
+	}
+	PackedVector3Array faces = VoxelWorld::_build_collision_faces(surfaces);
+	if (faces.size() > 0) {
+		StaticBody3D *sb = memnew(StaticBody3D);
+		CollisionShape3D *cs = memnew(CollisionShape3D);
+		Ref<ConcavePolygonShape3D> shape;
+		shape.instantiate();
+		shape->set_faces(faces);
+		cs->set_shape(shape);
+		sb->add_child(cs);
+		mesh_instance->add_child(sb);
+	}
 }

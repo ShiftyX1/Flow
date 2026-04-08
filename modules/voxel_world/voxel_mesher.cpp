@@ -59,6 +59,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 	// Each unique Texture2D pointer gets its own surface.
 	SurfaceData untextured_surface;
 	HashMap<Ref<Texture2D>, SurfaceData> textured_surfaces;
+	HashMap<Ref<Texture2D>, int> textured_block_types; // Track which block type owns each texture.
 
 	bool use_registry = p_registry.is_valid();
 
@@ -91,6 +92,9 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 				// Helper: pick surface + color for a face based on its texture.
 				auto get_face_surface = [&](const Ref<Texture2D> &p_tex) -> SurfaceData * {
 					if (p_tex.is_valid()) {
+						if (!textured_block_types.has(p_tex)) {
+							textured_block_types[p_tex] = (int)type;
+						}
 						return &textured_surfaces[p_tex];
 					}
 					return &untextured_surface;
@@ -195,6 +199,9 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 		MeshSurface s;
 		s.arrays = arrays;
 		s.texture = E.key;
+		if (textured_block_types.has(E.key)) {
+			s.block_type = textured_block_types[E.key];
+		}
 		result.push_back(s);
 	}
 

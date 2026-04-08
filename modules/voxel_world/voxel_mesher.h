@@ -16,6 +16,7 @@ public:
 	struct MeshSurface {
 		Array arrays;
 		Ref<Texture2D> texture; // null = vertex-colored (no texture).
+		int block_type = -1; // Primary block type for this surface (-1 = mixed/untextured).
 	};
 
 	// Build multiple mesh surfaces: one per unique texture + one for untextured faces.

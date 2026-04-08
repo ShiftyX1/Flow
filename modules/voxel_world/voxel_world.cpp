@@ -24,6 +24,9 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_texture_filter", "filter"), &VoxelWorld::set_texture_filter);
 	ClassDB::bind_method(D_METHOD("get_texture_filter"), &VoxelWorld::get_texture_filter);
 
+	ClassDB::bind_method(D_METHOD("set_alpha_block_flags", "flags"), &VoxelWorld::set_alpha_block_flags);
+	ClassDB::bind_method(D_METHOD("get_alpha_block_flags"), &VoxelWorld::get_alpha_block_flags);
+
 	ClassDB::bind_method(D_METHOD("set_block_registry", "registry"), &VoxelWorld::set_block_registry);
 	ClassDB::bind_method(D_METHOD("get_block_registry"), &VoxelWorld::get_block_registry);
 
@@ -39,6 +42,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "block_size", PROPERTY_HINT_RANGE, "0.1,10.0,0.1"), "set_block_size", "get_block_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sea_level", PROPERTY_HINT_RANGE, "0,63,1"), "set_sea_level", "get_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Leaves"), "set_alpha_block_flags", "get_alpha_block_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
@@ -70,6 +74,10 @@ void VoxelWorld::set_sea_level(int p_level) {
 
 void VoxelWorld::set_texture_filter(BaseMaterial3D::TextureFilter p_filter) {
 	texture_filter = p_filter;
+}
+
+void VoxelWorld::set_alpha_block_flags(uint32_t p_flags) {
+	alpha_block_flags = p_flags;
 }
 
 void VoxelWorld::set_block_registry(const Ref<VoxelBlockRegistry> &p_registry) {
@@ -323,6 +331,18 @@ void VoxelWorld::_integrate_finished_chunks() {
 					mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, result.surfaces[s].texture);
 					mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 					mat->set_texture_filter(texture_filter);
+
+					// Enable alpha transparency if this block type is flagged.
+					bool use_alpha = false;
+					int btype = result.surfaces[s].block_type;
+					if (btype == VOXEL_BLOCK_LEAVES && (alpha_block_flags & ALPHA_BLOCK_LEAVES)) {
+						use_alpha = true;
+					}
+					if (use_alpha) {
+						mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+						mat->set_alpha_scissor_threshold(0.5f);
+					}
+
 					array_mesh->surface_set_material(s, mat);
 				} else if (material.is_valid()) {
 					array_mesh->surface_set_material(s, material);
@@ -436,7 +456,7 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 	chunk->set_block(local.x, local.y, local.z, (VoxelBlockType)p_block_id);
 
 	// Rebuild the chunk mesh.
-	chunk->rebuild_mesh(block_size, material, block_registry, texture_filter);
+	chunk->rebuild_mesh(block_size, material, block_registry, texture_filter, alpha_block_flags);
 
 	Vector3i block_pos = world_to_block_pos(p_world_pos);
 

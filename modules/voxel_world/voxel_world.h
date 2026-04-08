@@ -13,11 +13,19 @@
 class VoxelWorld : public Node3D {
 	GDCLASS(VoxelWorld, Node3D);
 
+public:
+	// Bitfield flags: which block types use alpha-transparency textures.
+	enum AlphaBlockFlags {
+		ALPHA_BLOCK_LEAVES = 1 << 0,
+	};
+
+private:
 	int seed = -1;
 	int chunk_load_radius = 8;
 	float block_size = 1.0f;
 	int sea_level = 20;
 	int chunks_per_frame = 4; // Max chunks to integrate into scene tree per frame.
+	uint32_t alpha_block_flags = 0; // Bitfield of AlphaBlockFlags.
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 
 	Ref<VoxelBlockRegistry> block_registry;
@@ -85,6 +93,9 @@ public:
 
 	void set_texture_filter(BaseMaterial3D::TextureFilter p_filter);
 	BaseMaterial3D::TextureFilter get_texture_filter() const { return texture_filter; }
+
+	void set_alpha_block_flags(uint32_t p_flags);
+	uint32_t get_alpha_block_flags() const { return alpha_block_flags; }
 
 	void set_block_registry(const Ref<VoxelBlockRegistry> &p_registry);
 	Ref<VoxelBlockRegistry> get_block_registry() const;

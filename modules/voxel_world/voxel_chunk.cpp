@@ -21,7 +21,7 @@ void VoxelChunk::set_block(int p_x, int p_y, int p_z, VoxelBlockType p_type) {
 	blocks.write[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)] = (uint8_t)p_type;
 }
 
-MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter) {
+MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags) {
 	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
 
 	if (surfaces.size() == 0) {
@@ -37,6 +37,17 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 			mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, surfaces[i].texture);
 			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 			mat->set_texture_filter(p_filter);
+
+			bool use_alpha = false;
+			int btype = surfaces[i].block_type;
+			if (btype == VOXEL_BLOCK_LEAVES && (p_alpha_block_flags & (1 << 0))) {
+				use_alpha = true;
+			}
+			if (use_alpha) {
+				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+				mat->set_alpha_scissor_threshold(0.5f);
+			}
+
 			array_mesh->surface_set_material(i, mat);
 		} else if (p_material.is_valid()) {
 			array_mesh->surface_set_material(i, p_material);
@@ -53,7 +64,7 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 	return mesh_instance;
 }
 
-void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter) {
+void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags) {
 	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
 
 	if (!mesh_instance) {
@@ -75,6 +86,17 @@ void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_materia
 			mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, surfaces[i].texture);
 			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 			mat->set_texture_filter(p_filter);
+
+			bool use_alpha = false;
+			int btype = surfaces[i].block_type;
+			if (btype == VOXEL_BLOCK_LEAVES && (p_alpha_block_flags & (1 << 0))) {
+				use_alpha = true;
+			}
+			if (use_alpha) {
+				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+				mat->set_alpha_scissor_threshold(0.5f);
+			}
+
 			array_mesh->surface_set_material(i, mat);
 		} else if (p_material.is_valid()) {
 			array_mesh->surface_set_material(i, p_material);

@@ -48,7 +48,7 @@ void VoxelMesher::add_face(
 	}
 }
 
-Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry) {
+Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags) {
 	const int CX = VoxelTerrainGenerator::CHUNK_SIZE_X;
 	const int CY = VoxelTerrainGenerator::CHUNK_SIZE_Y;
 	const int CZ = VoxelTerrainGenerator::CHUNK_SIZE_Z;
@@ -78,7 +78,13 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 
 				auto is_neighbor_transparent = [&](int nx, int ny, int nz) -> bool {
 					VoxelBlockType neighbor = get_block(blocks, nx, ny, nz);
-					return VoxelBlockData::is_transparent(neighbor);
+					if (VoxelBlockData::is_transparent(neighbor)) {
+						return true;
+					}
+					if (p_alpha_block_flags & (1 << (int)neighbor)) {
+						return true;
+					}
+					return false;
 				};
 
 				// Lookup per-face textures from registry.

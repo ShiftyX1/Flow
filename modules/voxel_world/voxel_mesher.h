@@ -20,7 +20,7 @@ public:
 	};
 
 	// Build multiple mesh surfaces: one per unique texture + one for untextured faces.
-	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry);
+	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags = 0);
 
 private:
 	static _FORCE_INLINE_ VoxelBlockType get_block(const uint8_t *p_blocks, int p_x, int p_y, int p_z) {

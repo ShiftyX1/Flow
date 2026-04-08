@@ -36,17 +36,29 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("world_to_block_pos", "world_pos"), &VoxelWorld::world_to_block_pos);
 	ClassDB::bind_method(D_METHOD("block_to_world_pos", "block_pos"), &VoxelWorld::block_to_world_pos);
 	ClassDB::bind_method(D_METHOD("raycast_block", "origin", "direction", "max_distance"), &VoxelWorld::raycast_block, DEFVAL(10.0f));
+	ClassDB::bind_method(D_METHOD("move_body", "body", "velocity", "delta"), &VoxelWorld::move_body);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed", PROPERTY_HINT_RANGE, "-1,2147483647,1"), "set_seed", "get_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_load_radius", PROPERTY_HINT_RANGE, "2,16,1"), "set_chunk_load_radius", "get_chunk_load_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "block_size", PROPERTY_HINT_RANGE, "0.1,10.0,0.1"), "set_block_size", "get_block_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sea_level", PROPERTY_HINT_RANGE, "0,63,1"), "set_sea_level", "get_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Leaves"), "set_alpha_block_flags", "get_alpha_block_flags");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Air,Grass,Dirt,Stone,Sand,Water,Snow,Wood,Leaves,Bedrock"), "set_alpha_block_flags", "get_alpha_block_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
 	ADD_SIGNAL(MethodInfo("block_broken", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "old_block_id")));
+
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_AIR);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_GRASS);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_DIRT);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_STONE);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_SAND);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_WATER);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_SNOW);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_WOOD);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_LEAVES);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_BEDROCK);
 }
 
 VoxelWorld::VoxelWorld() {
@@ -258,7 +270,7 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	ChunkTaskResult result;
 	result.key = data->key;
 	result.blocks = world->generator->generate_chunk_data(data->chunk_x, data->chunk_z);
-	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry);
+	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, world->alpha_block_flags);
 
 	{
 		MutexLock lock(world->finished_mutex);
@@ -274,14 +286,14 @@ void VoxelWorld::_request_chunk(int p_cx, int p_cz) {
 		return;
 	}
 
-	ChunkTaskData *data = memnew(ChunkTaskData);
-	data->world = this;
-	data->key = key;
-	data->chunk_x = p_cx;
-	data->chunk_z = p_cz;
+	ChunkTaskData *task_data = memnew(ChunkTaskData);
+	task_data->world = this;
+	task_data->key = key;
+	task_data->chunk_x = p_cx;
+	task_data->chunk_z = p_cz;
 
 	int64_t task_id = WorkerThreadPool::get_singleton()->add_native_task(
-			&VoxelWorld::_chunk_generation_task, data, false, "VoxelChunkGen");
+			&VoxelWorld::_chunk_generation_task, task_data, false, "VoxelChunkGen");
 
 	pending_chunks[key] = task_id;
 }
@@ -333,12 +345,8 @@ void VoxelWorld::_integrate_finished_chunks() {
 					mat->set_texture_filter(texture_filter);
 
 					// Enable alpha transparency if this block type is flagged.
-					bool use_alpha = false;
 					int btype = result.surfaces[s].block_type;
-					if (btype == VOXEL_BLOCK_LEAVES && (alpha_block_flags & ALPHA_BLOCK_LEAVES)) {
-						use_alpha = true;
-					}
-					if (use_alpha) {
+					if (btype >= 0 && (alpha_block_flags & (1 << btype))) {
 						mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
 						mat->set_alpha_scissor_threshold(0.5f);
 					}
@@ -562,4 +570,103 @@ Dictionary VoxelWorld::raycast_block(const Vector3 &p_origin, const Vector3 &p_d
 	}
 
 	return result; // Empty — nothing hit.
+}
+
+// move_body: axis-separated AABB sweep against voxel grid
+
+static _FORCE_INLINE_ bool _is_block_solid(int p_block_id) {
+	return p_block_id != VOXEL_BLOCK_AIR && p_block_id != VOXEL_BLOCK_WATER;
+}
+
+// move_body: axis-separated AABB sweep against voxel grid
+Dictionary VoxelWorld::move_body(const AABB &p_body, const Vector3 &p_velocity, float p_delta) const {
+	const float bs = block_size;
+	const float inv_bs = 1.0f / bs;
+
+	Vector3 pos = p_body.position;
+	Vector3 size = p_body.size;
+	Vector3 vel = p_velocity;
+	Vector3 move = vel * p_delta;
+
+	bool on_ground = false;
+
+	// Resolve one axis at a time: Y first (gravity), then X, then Z.
+	// For each axis, move, then check overlapping blocks and push out.
+
+	auto resolve_axis = [&](int axis) {
+		float axis_move = move[axis];
+		if (Math::is_zero_approx(axis_move)) {
+			return;
+		}
+
+		Vector3 new_pos = pos;
+		new_pos[axis] += axis_move;
+
+		AABB swept(new_pos, size);
+
+		int min_bx = (int)Math::floor(swept.position.x * inv_bs);
+		int min_by = (int)Math::floor(swept.position.y * inv_bs);
+		int min_bz = (int)Math::floor(swept.position.z * inv_bs);
+		int max_bx = (int)Math::floor((swept.position.x + swept.size.x - 0.001f) * inv_bs);
+		int max_by = (int)Math::floor((swept.position.y + swept.size.y - 0.001f) * inv_bs);
+		int max_bz = (int)Math::floor((swept.position.z + swept.size.z - 0.001f) * inv_bs);
+
+		for (int by = min_by; by <= max_by; by++) {
+			for (int bz = min_bz; bz <= max_bz; bz++) {
+				for (int bx = min_bx; bx <= max_bx; bx++) {
+					Vector3 bc((bx + 0.5f) * bs, (by + 0.5f) * bs, (bz + 0.5f) * bs);
+					int bid = get_block_at(bc);
+					if (!_is_block_solid(bid)) {
+						continue;
+					}
+
+					AABB block_aabb(Vector3(bx * bs, by * bs, bz * bs), Vector3(bs, bs, bs));
+					if (!swept.intersects(block_aabb)) {
+						continue;
+					}
+
+					// Push out along this axis.
+					if (axis == 0) { // X
+						if (axis_move > 0) {
+							new_pos.x = block_aabb.position.x - size.x;
+						} else {
+							new_pos.x = block_aabb.position.x + bs;
+						}
+						vel.x = 0;
+					} else if (axis == 1) { // Y
+						if (axis_move < 0) {
+							new_pos.y = block_aabb.position.y + bs;
+							on_ground = true;
+						} else {
+							new_pos.y = block_aabb.position.y - size.y;
+						}
+						vel.y = 0;
+					} else { // Z
+						if (axis_move > 0) {
+							new_pos.z = block_aabb.position.z - size.z;
+						} else {
+							new_pos.z = block_aabb.position.z + bs;
+						}
+						vel.z = 0;
+					}
+
+					// Recompute swept AABB after correction.
+					swept = AABB(new_pos, size);
+				}
+			}
+		}
+
+		pos = new_pos;
+	};
+
+	// Y first, then X, then Z.
+	resolve_axis(1);
+	resolve_axis(0);
+	resolve_axis(2);
+
+	Dictionary result;
+	result["position"] = pos;
+	result["velocity"] = vel;
+	result["on_ground"] = on_ground;
+	return result;
 }

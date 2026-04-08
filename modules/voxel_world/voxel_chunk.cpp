@@ -22,7 +22,7 @@ void VoxelChunk::set_block(int p_x, int p_y, int p_z, VoxelBlockType p_type) {
 }
 
 MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags) {
-	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags);
 
 	if (surfaces.size() == 0) {
 		return nullptr;
@@ -38,12 +38,8 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 			mat->set_texture_filter(p_filter);
 
-			bool use_alpha = false;
 			int btype = surfaces[i].block_type;
-			if (btype == VOXEL_BLOCK_LEAVES && (p_alpha_block_flags & (1 << 0))) {
-				use_alpha = true;
-			}
-			if (use_alpha) {
+			if (btype >= 0 && (p_alpha_block_flags & (1 << btype))) {
 				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
 				mat->set_alpha_scissor_threshold(0.5f);
 			}
@@ -65,7 +61,7 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 }
 
 void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags) {
-	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry);
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags);
 
 	if (!mesh_instance) {
 		return;
@@ -87,12 +83,8 @@ void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_materia
 			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 			mat->set_texture_filter(p_filter);
 
-			bool use_alpha = false;
 			int btype = surfaces[i].block_type;
-			if (btype == VOXEL_BLOCK_LEAVES && (p_alpha_block_flags & (1 << 0))) {
-				use_alpha = true;
-			}
-			if (use_alpha) {
+			if (btype >= 0 && (p_alpha_block_flags & (1 << btype))) {
 				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
 				mat->set_alpha_scissor_threshold(0.5f);
 			}

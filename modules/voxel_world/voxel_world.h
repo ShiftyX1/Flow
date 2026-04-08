@@ -10,14 +10,14 @@
 #include "scene/3d/node_3d.h"
 #include "scene/resources/material.h"
 
+VARIANT_ENUM_CAST(VoxelBlockType);
+
 class VoxelWorld : public Node3D {
 	GDCLASS(VoxelWorld, Node3D);
 
 public:
-	// Bitfield flags: which block types use alpha-transparency textures.
-	enum AlphaBlockFlags {
-		ALPHA_BLOCK_LEAVES = 1 << 0,
-	};
+	// Bitfield: bit N = block type N uses alpha-transparency.
+	// e.g. (1 << VOXEL_BLOCK_LEAVES) enables alpha for leaves.
 
 private:
 	int seed = -1;
@@ -116,6 +116,10 @@ public:
 	// Simple voxel raycast. Returns Dictionary with "position", "normal", "block_id",
 	// "block_pos" keys, or empty Dictionary if nothing hit.
 	Dictionary raycast_block(const Vector3 &p_origin, const Vector3 &p_direction, float p_max_distance = 10.0f) const;
+
+	// Move an AABB body through the voxel world with collision.
+	// Returns Dictionary: { "position": Vector3, "velocity": Vector3, "on_ground": bool, "in_water": bool }
+	Dictionary move_body(const AABB &p_body, const Vector3 &p_velocity, float p_delta) const;
 
 	VoxelWorld();
 	~VoxelWorld();

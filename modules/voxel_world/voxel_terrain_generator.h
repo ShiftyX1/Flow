@@ -28,6 +28,15 @@ public:
 	static constexpr float CAVE_THRESHOLD = 0.15f;
 	static constexpr float CAVE_SURFACE_THRESHOLD = 0.35f;
 
+	// Water feature constants.
+	static constexpr float RIVER_WIDTH = 0.04f; // Ridged-noise threshold for river channels.
+	static constexpr float RIVER_DEPTH = 5.0f; // Max carving depth at river center (blocks).
+	static constexpr int RIVER_MIN_HEIGHT = 3; // Min blocks above sea_level to allow rivers.
+	static constexpr float LAKE_THRESHOLD = 0.35f; // lake_noise values above this form lakes.
+	static constexpr float LAKE_MAX_DEPTH = 6.0f; // Max basin depth at lake center.
+	static constexpr float OCEAN_THRESHOLD = -0.3f; // Continentalness below this becomes ocean floor.
+	static constexpr float OCEAN_DEPTH_SCALE = 15.0f; // Extra depression for deep ocean.
+
 private:
 	// 2D continentalness — base terrain height (OpenSimplex2, low freq).
 	Ref<FastNoiseLite> continentalness_noise;
@@ -41,12 +50,22 @@ private:
 	Ref<FastNoiseLite> cave_noise_a;
 	Ref<FastNoiseLite> cave_noise_b;
 
+	// Water feature noise layers.
+	Ref<FastNoiseLite> river_noise; // 2D ridged noise for river channels.
+	Ref<FastNoiseLite> river_warp_noise; // 2D domain-warp for river meandering.
+	Ref<FastNoiseLite> lake_noise; // 2D noise for inland lake basins.
+
 	int seed = 0;
 	int sea_level = 20;
 
 	float _get_base_height(int p_world_x, int p_world_z) const;
 	float _get_density(int p_world_x, int p_world_y, int p_world_z) const;
 	int _find_surface_y(int p_world_x, int p_world_z) const;
+
+	// Water feature helpers (per-column, 2D).
+	float _get_river_factor(int p_world_x, int p_world_z) const;
+	float _get_lake_factor(int p_world_x, int p_world_z) const;
+	int _get_local_water_level(int p_world_x, int p_world_z, float p_base_height) const;
 
 	bool _should_place_tree(int p_world_x, int p_world_z) const;
 	int _tree_trunk_height(int p_world_x, int p_world_z) const;

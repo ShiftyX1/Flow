@@ -66,6 +66,33 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	cave_noise_b->set_fractal_octaves(2);
 	cave_noise_b->set_fractal_lacunarity(2.0f);
 	cave_noise_b->set_fractal_gain(0.5f);
+
+	// --- River noise: 2D ridged noise for thin winding channels. ---
+	river_noise.instantiate();
+	river_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
+	river_noise->set_frequency(0.003f);
+	river_noise->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
+	river_noise->set_fractal_octaves(2);
+	river_noise->set_fractal_lacunarity(2.0f);
+	river_noise->set_fractal_gain(0.5f);
+
+	// --- River warp noise: 2D domain-warp for natural river meandering. ---
+	river_warp_noise.instantiate();
+	river_warp_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
+	river_warp_noise->set_frequency(0.002f);
+	river_warp_noise->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
+	river_warp_noise->set_fractal_octaves(2);
+	river_warp_noise->set_fractal_lacunarity(2.0f);
+	river_warp_noise->set_fractal_gain(0.5f);
+
+	// --- Lake noise: 2D noise for inland lake basins. ---
+	lake_noise.instantiate();
+	lake_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
+	lake_noise->set_frequency(0.004f);
+	lake_noise->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
+	lake_noise->set_fractal_octaves(3);
+	lake_noise->set_fractal_lacunarity(2.0f);
+	lake_noise->set_fractal_gain(0.5f);
 }
 
 VoxelTerrainGenerator::~VoxelTerrainGenerator() {
@@ -79,6 +106,9 @@ void VoxelTerrainGenerator::set_seed(int p_seed) {
 	density_detail_noise->set_seed(p_seed + 20);
 	cave_noise_a->set_seed(p_seed + 100);
 	cave_noise_b->set_seed(p_seed + 200);
+	river_noise->set_seed(p_seed + 300);
+	river_warp_noise->set_seed(p_seed + 400);
+	lake_noise->set_seed(p_seed + 500);
 }
 
 // ===========================================================================
@@ -100,7 +130,14 @@ float VoxelTerrainGenerator::_get_base_height(int p_world_x, int p_world_z) cons
 	real_t wz = (real_t)p_world_z;
 	real_t c = continentalness_noise->get_noise_2d(wx, wz);
 	real_t e = erosion_noise->get_noise_2d(wx, wz);
-	return BASE_HEIGHT + c * HEIGHT_SCALE + e * DETAIL_SCALE;
+	float base_h = BASE_HEIGHT + c * HEIGHT_SCALE + e * DETAIL_SCALE;
+
+	// Ocean: depress terrain below sea level for deeper ocean basins.
+	if (c < OCEAN_THRESHOLD) {
+		base_h -= (OCEAN_THRESHOLD - c) * OCEAN_DEPTH_SCALE;
+	}
+
+	return base_h;
 }
 
 float VoxelTerrainGenerator::_get_density(int p_world_x, int p_world_y, int p_world_z) const {
@@ -127,7 +164,65 @@ int VoxelTerrainGenerator::_find_surface_y(int p_world_x, int p_world_z) const {
 	return 1;
 }
 
-// --- Tree helpers (unchanged) ---
+// ===========================================================================
+// Water feature helpers (rivers, lakes)
+// ===========================================================================
+
+float VoxelTerrainGenerator::_get_river_factor(int p_world_x, int p_world_z) const {
+	real_t wx = (real_t)p_world_x;
+	real_t wz = (real_t)p_world_z;
+
+	// Domain-warp the sample coordinates for natural river meandering.
+	real_t warp_x = river_warp_noise->get_noise_2d(wx, wz) * 30.0f;
+	real_t warp_z = river_warp_noise->get_noise_2d(wx + 1000.0f, wz + 1000.0f) * 30.0f;
+
+	// Ridged noise: abs(noise) near 0 → river center.
+	real_t raw = river_noise->get_noise_2d(wx + warp_x, wz + warp_z);
+	float ridge = Math::abs(raw);
+
+	if (ridge < RIVER_WIDTH) {
+		return 1.0f - (ridge / RIVER_WIDTH); // 1.0 at center, 0.0 at edge.
+	}
+	return 0.0f;
+}
+
+float VoxelTerrainGenerator::_get_lake_factor(int p_world_x, int p_world_z) const {
+	real_t wx = (real_t)p_world_x;
+	real_t wz = (real_t)p_world_z;
+
+	real_t val = lake_noise->get_noise_2d(wx, wz);
+	if (val > LAKE_THRESHOLD) {
+		return (val - LAKE_THRESHOLD) / (1.0f - LAKE_THRESHOLD); // Normalized 0→1.
+	}
+	return 0.0f;
+}
+
+int VoxelTerrainGenerator::_get_local_water_level(int p_world_x, int p_world_z, float p_base_height) const {
+	int water_level = sea_level;
+
+	float river_f = _get_river_factor(p_world_x, p_world_z);
+	float lake_f = _get_lake_factor(p_world_x, p_world_z);
+
+	// Rivers: fill channel with water up to near the original surface.
+	if (river_f > 0.0f && p_base_height > (float)(sea_level + RIVER_MIN_HEIGHT)) {
+		int river_surface = (int)(p_base_height - 1.0f);
+		if (river_surface > water_level) {
+			water_level = river_surface;
+		}
+	}
+
+	// Lakes: fill basin with water partway up.
+	if (lake_f > 0.0f && p_base_height > (float)(sea_level + 5)) {
+		int lake_surface = (int)(p_base_height - lake_f * LAKE_MAX_DEPTH * 0.3f);
+		if (lake_surface > water_level) {
+			water_level = lake_surface;
+		}
+	}
+
+	return water_level;
+}
+
+// --- Tree helpers ---
 
 bool VoxelTerrainGenerator::_should_place_tree(int p_world_x, int p_world_z) const {
 	uint32_t h = _hash_u32((uint32_t)seed ^ ((uint32_t)p_world_x * 73856093U) ^ ((uint32_t)p_world_z * 19349663U));
@@ -197,14 +292,40 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	int world_x_start = p_chunk_x * CHUNK_SIZE_X;
 	int world_z_start = p_chunk_z * CHUNK_SIZE_Z;
 
-	// Per-column: cache base height and track actual surface Y for block-type assignment.
-	float base_heights[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+	// Per-column caches.
+	float base_heights[CHUNK_SIZE_X][CHUNK_SIZE_Z]; // Terrain height (after ocean depression, before river/lake carving).
+	float original_base_heights[CHUNK_SIZE_X][CHUNK_SIZE_Z]; // For water level computation.
+	float river_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+	float lake_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+	int local_water_levels[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	int surface_y_cache[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 
-	// Pre-compute 2D base heights.
+	// Pre-compute 2D per-column data: heights, water features, water levels.
 	for (int x = 0; x < CHUNK_SIZE_X; x++) {
 		for (int z = 0; z < CHUNK_SIZE_Z; z++) {
-			base_heights[x][z] = _get_base_height(world_x_start + x, world_z_start + z);
+			int wx = world_x_start + x;
+			int wz = world_z_start + z;
+
+			float bh = _get_base_height(wx, wz);
+			original_base_heights[x][z] = bh;
+
+			float rf = _get_river_factor(wx, wz);
+			float lf = _get_lake_factor(wx, wz);
+			river_factors[x][z] = rf;
+			lake_factors[x][z] = lf;
+
+			// Carve rivers: lower effective height where river runs above sea level.
+			if (rf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
+				bh -= rf * RIVER_DEPTH;
+			}
+
+			// Carve lakes: lower effective height for lake basins above sea level.
+			if (lf > 0.0f && bh > (float)(sea_level + 5)) {
+				bh -= lf * LAKE_MAX_DEPTH;
+			}
+
+			base_heights[x][z] = bh;
+			local_water_levels[x][z] = _get_local_water_level(wx, wz, original_base_heights[x][z]);
 			surface_y_cache[x][z] = 0;
 		}
 	}
@@ -215,6 +336,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			int wx = world_x_start + x;
 			int wz = world_z_start + z;
 			float bh = base_heights[x][z];
+			int wl = local_water_levels[x][z];
 
 			for (int y = 0; y < CHUNK_SIZE_Y; y++) {
 				int idx = block_index(x, y, z);
@@ -234,7 +356,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 					// Solid — will assign block type in pass 2.
 					blocks_w[idx] = VOXEL_BLOCK_STONE; // Placeholder, refined below.
 					surface_y_cache[x][z] = y; // Track highest solid.
-				} else if (y <= sea_level) {
+				} else if (y <= wl) {
 					blocks_w[idx] = VOXEL_BLOCK_WATER;
 				}
 				// else: AIR (already memset).
@@ -246,6 +368,11 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	for (int x = 0; x < CHUNK_SIZE_X; x++) {
 		for (int z = 0; z < CHUNK_SIZE_Z; z++) {
 			int sh = surface_y_cache[x][z];
+			int wl = local_water_levels[x][z];
+			float rf = river_factors[x][z];
+			float lf = lake_factors[x][z];
+			bool is_water_body = (rf > 0.0f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
+					(lf > 0.0f && original_base_heights[x][z] > (float)(sea_level + 5));
 
 			for (int y = CHUNK_SIZE_Y - 1; y >= 1; y--) {
 				int idx = block_index(x, y, z);
@@ -259,10 +386,11 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 
 				if (depth == 0) {
 					// Surface block.
-					if (sh <= sea_level) {
+					if (is_water_body || sh <= wl) {
+						// River bed, lake bed, or ocean/sea floor.
 						blocks_w[idx] = VOXEL_BLOCK_SAND;
-					} else if (sh <= sea_level + 2) {
-						blocks_w[idx] = VOXEL_BLOCK_SAND; // Beach.
+					} else if (sh <= wl + 2) {
+						blocks_w[idx] = VOXEL_BLOCK_SAND; // Shore / beach.
 					} else if (sh > 50) {
 						blocks_w[idx] = VOXEL_BLOCK_SNOW;
 					} else {
@@ -270,7 +398,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 					}
 				} else if (depth <= 4) {
 					// Below surface (1-4 blocks deep).
-					if (sh <= sea_level + 2) {
+					if (is_water_body || sh <= wl + 2) {
 						blocks_w[idx] = VOXEL_BLOCK_SAND;
 					} else {
 						blocks_w[idx] = VOXEL_BLOCK_DIRT;
@@ -323,6 +451,13 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	for (int wx = world_x_start - border; wx < world_x_start + CHUNK_SIZE_X + border; wx++) {
 		for (int wz = world_z_start - border; wz < world_z_start + CHUNK_SIZE_Z + border; wz++) {
 			if (!_should_place_tree(wx, wz)) {
+				continue;
+			}
+
+			// Skip trees in water bodies (rivers, lakes).
+			float rf = _get_river_factor(wx, wz);
+			float lf = _get_lake_factor(wx, wz);
+			if (rf > 0.0f || lf > 0.0f) {
 				continue;
 			}
 

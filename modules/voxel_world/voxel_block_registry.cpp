@@ -24,6 +24,8 @@ bool VoxelBlockRegistry::_set(const StringName &p_name, const Variant &p_value) 
 			set_block_texture_side(idx, p_value);
 		} else if (what == "texture_bottom") {
 			set_block_texture_bottom(idx, p_value);
+		} else if (what == "shader_material") {
+			set_block_shader_material(idx, p_value);
 		} else {
 			return false;
 		}
@@ -49,6 +51,8 @@ bool VoxelBlockRegistry::_get(const StringName &p_name, Variant &r_ret) const {
 		r_ret = get_block_texture_side(idx);
 	} else if (what == "texture_bottom") {
 		r_ret = get_block_texture_bottom(idx);
+	} else if (what == "shader_material") {
+		r_ret = get_block_shader_material(idx);
 	} else {
 		return false;
 	}
@@ -69,6 +73,7 @@ void VoxelBlockRegistry::_get_property_list(List<PropertyInfo> *p_list) const {
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "texture_top", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"));
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "texture_side", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"));
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "texture_bottom", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"));
+		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "shader_material", PROPERTY_HINT_RESOURCE_TYPE, "ShaderMaterial"));
 	}
 }
 
@@ -91,6 +96,10 @@ void VoxelBlockRegistry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_block_texture_bottom", "id"), &VoxelBlockRegistry::get_block_texture_bottom);
 
 	ClassDB::bind_method(D_METHOD("block_has_texture", "id"), &VoxelBlockRegistry::block_has_texture);
+
+	ClassDB::bind_method(D_METHOD("set_block_shader_material", "id", "material"), &VoxelBlockRegistry::set_block_shader_material);
+	ClassDB::bind_method(D_METHOD("get_block_shader_material", "id"), &VoxelBlockRegistry::get_block_shader_material);
+	ClassDB::bind_method(D_METHOD("block_has_shader", "id"), &VoxelBlockRegistry::block_has_shader);
 
 	ClassDB::bind_method(D_METHOD("setup_defaults"), &VoxelBlockRegistry::setup_defaults);
 }
@@ -187,6 +196,24 @@ bool VoxelBlockRegistry::block_has_texture(int p_id) const {
 	}
 	const BlockEntry &entry = blocks[p_id];
 	return entry.texture_top.is_valid() || entry.texture_side.is_valid() || entry.texture_bottom.is_valid();
+}
+
+void VoxelBlockRegistry::set_block_shader_material(int p_id, const Ref<ShaderMaterial> &p_material) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].shader_material = p_material;
+	emit_changed();
+}
+
+Ref<ShaderMaterial> VoxelBlockRegistry::get_block_shader_material(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), Ref<ShaderMaterial>());
+	return blocks[p_id].shader_material;
+}
+
+bool VoxelBlockRegistry::block_has_shader(int p_id) const {
+	if (!blocks.has(p_id)) {
+		return false;
+	}
+	return blocks[p_id].shader_material.is_valid();
 }
 
 void VoxelBlockRegistry::setup_defaults() {

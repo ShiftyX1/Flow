@@ -8,6 +8,7 @@
 #include "core/math/vector3.h"
 #include "core/templates/hash_map.h"
 #include "core/variant/array.h"
+#include "scene/resources/material.h"
 #include "scene/resources/mesh.h"
 #include "scene/resources/texture.h"
 
@@ -16,6 +17,7 @@ public:
 	struct MeshSurface {
 		Array arrays;
 		Ref<Texture2D> texture; // null = vertex-colored (no texture).
+		Ref<ShaderMaterial> shader_material; // Optional custom shader for this surface.
 		int block_type = -1; // Primary block type for this surface (-1 = mixed/untextured).
 	};
 

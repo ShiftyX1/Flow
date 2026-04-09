@@ -337,7 +337,13 @@ void VoxelWorld::_integrate_finished_chunks() {
 
 			for (int s = 0; s < result.surfaces.size(); s++) {
 				array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, result.surfaces[s].arrays);
-				if (result.surfaces[s].texture.is_valid()) {
+				if (result.surfaces[s].shader_material.is_valid()) {
+					Ref<ShaderMaterial> mat = result.surfaces[s].shader_material->duplicate();
+					if (result.surfaces[s].texture.is_valid()) {
+						mat->set_shader_parameter("texture_albedo", result.surfaces[s].texture);
+					}
+					array_mesh->surface_set_material(s, mat);
+				} else if (result.surfaces[s].texture.is_valid()) {
 					Ref<StandardMaterial3D> mat;
 					mat.instantiate();
 					mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, result.surfaces[s].texture);

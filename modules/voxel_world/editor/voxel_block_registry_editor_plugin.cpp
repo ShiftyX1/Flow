@@ -19,8 +19,8 @@
 // ============================================================
 
 VoxelBlockRegistryEditorDialog::VoxelBlockRegistryEditorDialog() {
-	set_title("Voxel Block Registry — Texture Editor");
-	set_min_size(Size2(700 * EDSCALE, 500 * EDSCALE));
+	set_title("Voxel Block Registry — Texture & Shader Editor");
+	set_min_size(Size2(800 * EDSCALE, 500 * EDSCALE));
 
 	// Hide the built-in message label so only our content shows.
 	get_label()->hide();
@@ -74,6 +74,20 @@ void VoxelBlockRegistryEditorDialog::_texture_changed(const Ref<Resource> &p_res
 			undo_redo->commit_action();
 		} break;
 	}
+}
+
+void VoxelBlockRegistryEditorDialog::_shader_changed(const Ref<Resource> &p_resource, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	Ref<ShaderMaterial> mat = p_resource;
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+
+	undo_redo->create_action("Set Block Shader Material");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/shader_material", p_block_id), mat);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/shader_material", p_block_id), registry->get_block_shader_material(p_block_id));
+	undo_redo->commit_action();
 }
 
 void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
@@ -168,6 +182,38 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 			*pickers[f] = picker;
 		}
 
+		// --- Shader material picker ---
+		HBoxContainer *shader_row = memnew(HBoxContainer);
+		shader_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(shader_row);
+
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			shader_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text("Shader Material");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			EditorResourcePicker *picker = memnew(EditorResourcePicker);
+			picker->set_base_type("ShaderMaterial");
+			picker->set_editable(true);
+			picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+
+			if (registry->has_block(block_id)) {
+				Ref<ShaderMaterial> current_shader = registry->get_block_shader_material(block_id);
+				if (current_shader.is_valid()) {
+					picker->set_edited_resource(current_shader);
+				}
+			}
+
+			picker->connect("resource_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_shader_changed).bind(block_id));
+			slot->add_child(picker);
+			row.picker_shader = picker;
+		}
+
 		block_rows.push_back(row);
 		block_list_vbox->add_child(memnew(HSeparator));
 	}
@@ -182,7 +228,7 @@ VoxelBlockRegistryInspectorButton::VoxelBlockRegistryInspectorButton() {
 	add_child(dialog);
 
 	edit_button = memnew(Button);
-	edit_button->set_text("Edit Block Textures...");
+	edit_button->set_text("Edit Block Textures & Shaders...");
 	edit_button->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	edit_button->set_custom_minimum_size(Size2(0, 36 * EDSCALE));
 	edit_button->connect(SceneStringName(pressed), callable_mp(this, &VoxelBlockRegistryInspectorButton::_on_edit_pressed));
@@ -196,7 +242,7 @@ void VoxelBlockRegistryInspectorButton::set_registry(const Ref<VoxelBlockRegistr
 	// Show block count on button.
 	if (p_registry.is_valid()) {
 		int count = p_registry->get_block_count();
-		edit_button->set_text(vformat("Edit Block Textures (%d blocks)...", count));
+		edit_button->set_text(vformat("Edit Block Textures & Shaders (%d blocks)...", count));
 	}
 }
 

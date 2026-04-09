@@ -2,11 +2,12 @@
 
 #include "core/io/resource.h"
 #include "core/templates/hash_map.h"
+#include "scene/resources/material.h"
 #include "scene/resources/texture.h"
 
-// Texture-only registry for engine-defined block types.
+// Registry for engine-defined block types: per-face textures and optional ShaderMaterial.
 // Block logic (solid, transparent, color, name) lives in VoxelBlockData.
-// This resource allows assigning textures to blocks from the editor.
+// This resource allows assigning textures and shaders to blocks from the editor.
 class VoxelBlockRegistry : public Resource {
 	GDCLASS(VoxelBlockRegistry, Resource);
 
@@ -15,6 +16,7 @@ public:
 		Ref<Texture2D> texture_top;
 		Ref<Texture2D> texture_side;
 		Ref<Texture2D> texture_bottom;
+		Ref<ShaderMaterial> shader_material;
 	};
 
 private:
@@ -46,6 +48,10 @@ public:
 	Ref<Texture2D> get_block_texture_for_face(int p_id, const Vector3 &p_normal) const;
 
 	bool block_has_texture(int p_id) const;
+
+	void set_block_shader_material(int p_id, const Ref<ShaderMaterial> &p_material);
+	Ref<ShaderMaterial> get_block_shader_material(int p_id) const;
+	bool block_has_shader(int p_id) const;
 
 	const HashMap<int, BlockEntry> &get_blocks_map() const { return blocks; }
 

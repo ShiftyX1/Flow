@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class name="VoxelBlockRegistry" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
 	<brief_description>
-		Resource that assigns textures to engine-defined block types for [VoxelWorld].
+		Resource that assigns textures and optional shaders to engine-defined block types for [VoxelWorld].
 	</brief_description>
 	<description>
-		A texture registry used by [VoxelWorld]. Each block type is defined at the engine level (in VoxelBlockData) with its name, color, solidity, and transparency. This resource allows assigning per-face textures (top, side, bottom) to those block types from the editor.
-		When no registry is assigned to a [VoxelWorld], one is created automatically with entries for all built-in block types (no textures assigned, vertex colors used).
+		A registry used by [VoxelWorld]. Each block type is defined at the engine level (in VoxelBlockData) with its name, color, solidity, and transparency. This resource allows assigning per-face textures (top, side, bottom) and an optional [ShaderMaterial] to those block types from the editor.
+		When a block has a [ShaderMaterial] assigned, all its faces are rendered with that shader instead of the default [StandardMaterial3D]. The block's primary texture is automatically set as the [code]texture_albedo[/code] shader parameter. Shader authors should declare [code]uniform sampler2D texture_albedo;[/code] in their [code].gdshader[/code] file to receive the block texture.
+		When no registry is assigned to a [VoxelWorld], one is created automatically with entries for all built-in block types (no textures or shaders assigned, vertex colors used).
 	</description>
 	<methods>
 		<method name="create_block">
@@ -97,6 +98,28 @@
 			<return type="void" />
 			<description>
 				Populates the registry with entries for all built-in block types (Air, Grass, Dirt, Stone, Sand, Water, Snow, Wood, Leaves, Bedrock). No textures are assigned; blocks will use engine-defined vertex colors by default.
+			</description>
+		</method>
+		<method name="set_block_shader_material">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="material" type="ShaderMaterial" />
+			<description>
+				Sets the [ShaderMaterial] for the block. When set, all faces of this block type are rendered with this shader instead of the default material. The block's primary texture is automatically passed as the [code]texture_albedo[/code] shader parameter.
+			</description>
+		</method>
+		<method name="get_block_shader_material" qualifiers="const">
+			<return type="ShaderMaterial" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the [ShaderMaterial] assigned to the block, or [code]null[/code] if none is set.
+			</description>
+		</method>
+		<method name="block_has_shader" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if the block has a [ShaderMaterial] assigned.
 			</description>
 		</method>
 	</methods>

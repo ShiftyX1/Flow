@@ -27,12 +27,14 @@ class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 		EditorResourcePicker *picker_top = nullptr;
 		EditorResourcePicker *picker_side = nullptr;
 		EditorResourcePicker *picker_bottom = nullptr;
+		EditorResourcePicker *picker_shader = nullptr;
 	};
 
 	Vector<BlockRow> block_rows;
 
 	void _rebuild_block_list();
 	void _texture_changed(const Ref<Resource> &p_resource, int p_block_id, int p_face);
+	void _shader_changed(const Ref<Resource> &p_resource, int p_block_id);
 
 public:
 	void set_registry(const Ref<VoxelBlockRegistry> &p_registry);

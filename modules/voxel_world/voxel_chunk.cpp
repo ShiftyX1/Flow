@@ -33,7 +33,7 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, surfaces[i].arrays);
 		if (surfaces[i].shader_material.is_valid()) {
 			Ref<ShaderMaterial> mat = surfaces[i].shader_material->duplicate();
-			if (surfaces[i].texture.is_valid()) {
+			if (surfaces[i].texture.is_valid() && mat->get_shader().is_valid()) {
 				mat->set_shader_parameter("texture_albedo", surfaces[i].texture);
 			}
 			array_mesh->surface_set_material(i, mat);
@@ -84,7 +84,7 @@ void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_materia
 		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, surfaces[i].arrays);
 		if (surfaces[i].shader_material.is_valid()) {
 			Ref<ShaderMaterial> mat = surfaces[i].shader_material->duplicate();
-			if (surfaces[i].texture.is_valid()) {
+			if (surfaces[i].texture.is_valid() && mat->get_shader().is_valid()) {
 				mat->set_shader_parameter("texture_albedo", surfaces[i].texture);
 			}
 			array_mesh->surface_set_material(i, mat);

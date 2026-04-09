@@ -29,9 +29,10 @@ public:
 	static constexpr float CAVE_SURFACE_THRESHOLD = 0.35f;
 
 	// Water feature constants.
-	static constexpr float RIVER_WIDTH = 0.04f; // Ridged-noise threshold for river channels.
-	static constexpr float RIVER_DEPTH = 5.0f; // Max carving depth at river center (blocks).
-	static constexpr int RIVER_MIN_HEIGHT = 3; // Min blocks above sea_level to allow rivers.
+	static constexpr float RIVER_WIDTH = 0.07f; // Ridged-noise threshold for river channels.
+	static constexpr float RIVER_BANK_WIDTH = 0.04f; // Extra threshold zone for smooth bank blending.
+	static constexpr int RIVER_BED_OFFSET = 2; // River bed sits this many blocks below water surface.
+	static constexpr int RIVER_MIN_HEIGHT = 5; // Min blocks above sea_level to allow rivers.
 	static constexpr float LAKE_THRESHOLD = 0.35f; // lake_noise values above this form lakes.
 	static constexpr float LAKE_MAX_DEPTH = 6.0f; // Max basin depth at lake center.
 	static constexpr float OCEAN_THRESHOLD = -0.3f; // Continentalness below this becomes ocean floor.
@@ -64,6 +65,7 @@ private:
 
 	// Water feature helpers (per-column, 2D).
 	float _get_river_factor(int p_world_x, int p_world_z) const;
+	float _get_river_bank_factor(int p_world_x, int p_world_z) const;
 	float _get_lake_factor(int p_world_x, int p_world_z) const;
 	int _get_local_water_level(int p_world_x, int p_world_z, float p_base_height) const;
 

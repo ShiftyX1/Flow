@@ -168,20 +168,51 @@ int VoxelTerrainGenerator::_find_surface_y(int p_world_x, int p_world_z) const {
 // Water feature helpers (rivers, lakes)
 // ===========================================================================
 
+// Smoothstep helper: maps t in [0,1] to smooth Hermite interpolation.
+static _FORCE_INLINE_ float _smoothstep(float t) {
+	t = CLAMP(t, 0.0f, 1.0f);
+	return t * t * (3.0f - 2.0f * t);
+}
+
 float VoxelTerrainGenerator::_get_river_factor(int p_world_x, int p_world_z) const {
 	real_t wx = (real_t)p_world_x;
 	real_t wz = (real_t)p_world_z;
 
-	// Domain-warp the sample coordinates for natural river meandering.
-	real_t warp_x = river_warp_noise->get_noise_2d(wx, wz) * 30.0f;
-	real_t warp_z = river_warp_noise->get_noise_2d(wx + 1000.0f, wz + 1000.0f) * 30.0f;
+	// Domain-warp with two octaves for organic meanders.
+	real_t warp_x = river_warp_noise->get_noise_2d(wx, wz) * 50.0f;
+	real_t warp_z = river_warp_noise->get_noise_2d(wx + 1000.0f, wz + 1000.0f) * 50.0f;
+	// Second octave at 2x frequency for finer bends.
+	warp_x += river_warp_noise->get_noise_2d(wx * 2.0f + 500.0f, wz * 2.0f) * 20.0f;
+	warp_z += river_warp_noise->get_noise_2d(wx * 2.0f + 1500.0f, wz * 2.0f + 500.0f) * 20.0f;
 
 	// Ridged noise: abs(noise) near 0 → river center.
 	real_t raw = river_noise->get_noise_2d(wx + warp_x, wz + warp_z);
 	float ridge = Math::abs(raw);
 
 	if (ridge < RIVER_WIDTH) {
-		return 1.0f - (ridge / RIVER_WIDTH); // 1.0 at center, 0.0 at edge.
+		// Smoothstep for parabolic U-shaped cross-section (deeper center, shallow edges).
+		return _smoothstep(1.0f - (ridge / RIVER_WIDTH));
+	}
+	return 0.0f;
+}
+
+float VoxelTerrainGenerator::_get_river_bank_factor(int p_world_x, int p_world_z) const {
+	real_t wx = (real_t)p_world_x;
+	real_t wz = (real_t)p_world_z;
+
+	// Same warp as _get_river_factor to stay consistent.
+	real_t warp_x = river_warp_noise->get_noise_2d(wx, wz) * 50.0f;
+	real_t warp_z = river_warp_noise->get_noise_2d(wx + 1000.0f, wz + 1000.0f) * 50.0f;
+	warp_x += river_warp_noise->get_noise_2d(wx * 2.0f + 500.0f, wz * 2.0f) * 20.0f;
+	warp_z += river_warp_noise->get_noise_2d(wx * 2.0f + 1500.0f, wz * 2.0f + 500.0f) * 20.0f;
+
+	real_t raw = river_noise->get_noise_2d(wx + warp_x, wz + warp_z);
+	float ridge = Math::abs(raw);
+
+	// Bank zone: between RIVER_WIDTH and RIVER_WIDTH + RIVER_BANK_WIDTH.
+	if (ridge >= RIVER_WIDTH && ridge < RIVER_WIDTH + RIVER_BANK_WIDTH) {
+		float t = (ridge - RIVER_WIDTH) / RIVER_BANK_WIDTH;
+		return _smoothstep(1.0f - t); // 1.0 at river edge, 0.0 at outer bank.
 	}
 	return 0.0f;
 }
@@ -200,16 +231,11 @@ float VoxelTerrainGenerator::_get_lake_factor(int p_world_x, int p_world_z) cons
 int VoxelTerrainGenerator::_get_local_water_level(int p_world_x, int p_world_z, float p_base_height) const {
 	int water_level = sea_level;
 
-	float river_f = _get_river_factor(p_world_x, p_world_z);
 	float lake_f = _get_lake_factor(p_world_x, p_world_z);
 
-	// Rivers: fill channel with water up to near the original surface.
-	if (river_f > 0.0f && p_base_height > (float)(sea_level + RIVER_MIN_HEIGHT)) {
-		int river_surface = (int)(p_base_height - 1.0f);
-		if (river_surface > water_level) {
-			water_level = river_surface;
-		}
-	}
+	// Rivers: water surface is always at sea_level — guarantees flat,
+	// continuous water across the entire river, connecting to oceans.
+	// No per-column river water level — carving handles the channel shape.
 
 	// Lakes: fill basin with water partway up.
 	if (lake_f > 0.0f && p_base_height > (float)(sea_level + 5)) {
@@ -296,6 +322,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	float base_heights[CHUNK_SIZE_X][CHUNK_SIZE_Z]; // Terrain height (after ocean depression, before river/lake carving).
 	float original_base_heights[CHUNK_SIZE_X][CHUNK_SIZE_Z]; // For water level computation.
 	float river_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+	float river_bank_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	float lake_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	int local_water_levels[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	int surface_y_cache[CHUNK_SIZE_X][CHUNK_SIZE_Z];
@@ -310,13 +337,25 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			original_base_heights[x][z] = bh;
 
 			float rf = _get_river_factor(wx, wz);
+			float rbf = _get_river_bank_factor(wx, wz);
 			float lf = _get_lake_factor(wx, wz);
 			river_factors[x][z] = rf;
+			river_bank_factors[x][z] = rbf;
 			lake_factors[x][z] = lf;
 
-			// Carve rivers: lower effective height where river runs above sea level.
+			// Carve rivers: lerp terrain height toward river bed level.
+			// River bed = sea_level - RIVER_BED_OFFSET.
+			// This creates deep gorges in mountains and shallow channels in plains,
+			// all reaching the same bed level — like Minecraft rivers.
+			float river_bed = (float)(sea_level - RIVER_BED_OFFSET);
 			if (rf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
-				bh -= rf * RIVER_DEPTH;
+				bh = Math::lerp(bh, river_bed, rf);
+			}
+
+			// Bank blending: gradually slope terrain toward sea_level at river edges.
+			if (rbf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
+				float bank_target = (float)(sea_level + 1);
+				bh = Math::lerp(bh, bank_target, rbf * 0.5f);
 			}
 
 			// Carve lakes: lower effective height for lake basins above sea level.
@@ -370,8 +409,10 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			int sh = surface_y_cache[x][z];
 			int wl = local_water_levels[x][z];
 			float rf = river_factors[x][z];
+			float rbf = river_bank_factors[x][z];
 			float lf = lake_factors[x][z];
 			bool is_water_body = (rf > 0.0f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
+					(rbf > 0.3f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
 					(lf > 0.0f && original_base_heights[x][z] > (float)(sea_level + 5));
 
 			for (int y = CHUNK_SIZE_Y - 1; y >= 1; y--) {
@@ -454,10 +495,11 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				continue;
 			}
 
-			// Skip trees in water bodies (rivers, lakes).
+			// Skip trees in water bodies and river banks.
 			float rf = _get_river_factor(wx, wz);
+			float rbf = _get_river_bank_factor(wx, wz);
 			float lf = _get_lake_factor(wx, wz);
-			if (rf > 0.0f || lf > 0.0f) {
+			if (rf > 0.0f || rbf > 0.0f || lf > 0.0f) {
 				continue;
 			}
 

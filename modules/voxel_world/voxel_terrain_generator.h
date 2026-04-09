@@ -2,8 +2,30 @@
 
 #include "voxel_block_data.h"
 
+#include "core/math/vector2.h"
 #include "core/templates/vector.h"
 #include "modules/noise/fastnoise_lite.h"
+
+// ---- Biome system ----
+
+enum BiomeType : uint8_t {
+	BIOME_DESERT = 0,
+	BIOME_MEADOW,
+	BIOME_FOREST,
+	BIOME_MOUNTAINS,
+	BIOME_MAX
+};
+
+struct BiomeParams {
+	float height_base; // Additive offset to BASE_HEIGHT.
+	float height_scale; // Multiplier for continentalness contribution.
+	float detail_scale; // Multiplier for erosion contribution.
+	float density_3d_weight; // How much 3D noise affects terrain shape.
+	uint8_t surface_block; // Top block type.
+	uint8_t subsurface_block; // Blocks below surface (depth 1-4).
+	int tree_density; // Hash modulus for tree placement (lower = denser, 0 = no trees).
+	int snow_line; // Y-level above which snow replaces surface block.
+};
 
 class VoxelTerrainGenerator {
 public:
@@ -13,30 +35,30 @@ public:
 
 	// Tree generation constants.
 	static const int TREE_CHECK_BORDER = 4;
-	static const int TREE_DENSITY = 80;
 	static const int TREE_MIN_TRUNK = 4;
 	static const int TREE_MAX_TRUNK = 6;
 	static const int TREE_CANOPY_RADIUS = 2;
 
-	// 3D density terrain constants.
+	// 3D density terrain constants (defaults, overridden per-biome).
 	static constexpr float BASE_HEIGHT = 32.0f;
-	static constexpr float HEIGHT_SCALE = 20.0f;
-	static constexpr float DETAIL_SCALE = 4.0f;
-	static constexpr float DENSITY_3D_WEIGHT = 6.0f; // How much 3D noise can shift the surface.
-	static constexpr float SQUISH_FACTOR = 0.12f; // How quickly density increases with depth.
+	static constexpr float SQUISH_FACTOR = 0.12f;
 
 	static constexpr float CAVE_THRESHOLD = 0.15f;
 	static constexpr float CAVE_SURFACE_THRESHOLD = 0.35f;
 
 	// Water feature constants.
-	static constexpr float RIVER_WIDTH = 0.07f; // Ridged-noise threshold for river channels.
-	static constexpr float RIVER_BANK_WIDTH = 0.04f; // Extra threshold zone for smooth bank blending.
-	static constexpr int RIVER_BED_OFFSET = 2; // River bed sits this many blocks below water surface.
-	static constexpr int RIVER_MIN_HEIGHT = 5; // Min blocks above sea_level to allow rivers.
-	static constexpr float LAKE_THRESHOLD = 0.35f; // lake_noise values above this form lakes.
-	static constexpr float LAKE_MAX_DEPTH = 6.0f; // Max basin depth at lake center.
-	static constexpr float OCEAN_THRESHOLD = -0.3f; // Continentalness below this becomes ocean floor.
-	static constexpr float OCEAN_DEPTH_SCALE = 15.0f; // Extra depression for deep ocean.
+	static constexpr float RIVER_WIDTH = 0.07f;
+	static constexpr float RIVER_BANK_WIDTH = 0.04f;
+	static constexpr int RIVER_BED_OFFSET = 2;
+	static constexpr int RIVER_MIN_HEIGHT = 5;
+	static constexpr float LAKE_THRESHOLD = 0.35f;
+	static constexpr float LAKE_MAX_DEPTH = 6.0f;
+	static constexpr float OCEAN_THRESHOLD = -0.3f;
+	static constexpr float OCEAN_DEPTH_SCALE = 15.0f;
+
+	// Biome lookup tables.
+	static const BiomeParams BIOME_TABLE[BIOME_MAX];
+	static const Vector2 BIOME_CENTERS[BIOME_MAX]; // Ideal (temperature, humidity) per biome.
 
 private:
 	// 2D continentalness — base terrain height (OpenSimplex2, low freq).
@@ -52,16 +74,23 @@ private:
 	Ref<FastNoiseLite> cave_noise_b;
 
 	// Water feature noise layers.
-	Ref<FastNoiseLite> river_noise; // 2D ridged noise for river channels.
-	Ref<FastNoiseLite> river_warp_noise; // 2D domain-warp for river meandering.
-	Ref<FastNoiseLite> lake_noise; // 2D noise for inland lake basins.
+	Ref<FastNoiseLite> river_noise;
+	Ref<FastNoiseLite> river_warp_noise;
+	Ref<FastNoiseLite> lake_noise;
+
+	// Biome noise layers — very low frequency for large biome regions.
+	Ref<FastNoiseLite> temperature_noise;
+	Ref<FastNoiseLite> humidity_noise;
 
 	int seed = 0;
 	int sea_level = 20;
 
-	float _get_base_height(int p_world_x, int p_world_z) const;
-	float _get_density(int p_world_x, int p_world_y, int p_world_z) const;
-	int _find_surface_y(int p_world_x, int p_world_z) const;
+	// Biome helpers.
+	void _get_biome_weights(int p_world_x, int p_world_z, float r_weights[BIOME_MAX]) const;
+	BiomeParams _get_blended_params(const float p_weights[BIOME_MAX]) const;
+
+	float _get_base_height(int p_world_x, int p_world_z, const BiomeParams &p_params) const;
+	int _find_surface_y(int p_world_x, int p_world_z, const BiomeParams &p_params) const;
 
 	// Water feature helpers (per-column, 2D).
 	float _get_river_factor(int p_world_x, int p_world_z) const;
@@ -69,7 +98,7 @@ private:
 	float _get_lake_factor(int p_world_x, int p_world_z) const;
 	int _get_local_water_level(int p_world_x, int p_world_z, float p_base_height) const;
 
-	bool _should_place_tree(int p_world_x, int p_world_z) const;
+	bool _should_place_tree(int p_world_x, int p_world_z, int p_tree_density) const;
 	int _tree_trunk_height(int p_world_x, int p_world_z) const;
 	void _place_tree(uint8_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height) const;
 

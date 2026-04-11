@@ -318,20 +318,49 @@ float VoxelTerrainGenerator::_get_lake_factor(int p_world_x, int p_world_z) cons
 	return 0.0f;
 }
 
-int VoxelTerrainGenerator::_get_local_water_level(int p_world_x, int p_world_z, float p_base_height) const {
+float VoxelTerrainGenerator::_get_lake_bank_factor(int p_world_x, int p_world_z) const {
+	real_t wx = (real_t)p_world_x;
+	real_t wz = (real_t)p_world_z;
+
+	real_t val = lake_noise->get_noise_2d(wx, wz);
+
+	// Bank zone: where noise is just below LAKE_THRESHOLD (approaching lake).
+	if (val > LAKE_THRESHOLD - LAKE_BANK_WIDTH && val <= LAKE_THRESHOLD) {
+		float t = (LAKE_THRESHOLD - val) / LAKE_BANK_WIDTH;
+		return _smoothstep(1.0f - t); // 1.0 at lake edge, 0.0 at outer bank.
+	}
+	return 0.0f;
+}
+
+int VoxelTerrainGenerator::_get_local_water_level(int p_world_x, int p_world_z) const {
 	int water_level = sea_level;
 
 	float lake_f = _get_lake_factor(p_world_x, p_world_z);
 
 	// Rivers: water surface is always at sea_level — guarantees flat,
 	// continuous water across the entire river, connecting to oceans.
-	// No per-column river water level — carving handles the channel shape.
 
-	// Lakes: fill basin with water partway up.
-	if (lake_f > 0.0f && p_base_height > (float)(sea_level + 5)) {
-		int lake_surface = (int)(p_base_height - lake_f * LAKE_MAX_DEPTH * 0.3f);
-		if (lake_surface > water_level) {
-			water_level = lake_surface;
+	// Lakes: compute a UNIFORM water level for the entire lake basin.
+	// Snap coordinates to a coarse grid so all columns in a lake share
+	// the same reference height → perfectly flat water surface.
+	if (lake_f > 0.0f) {
+		int half = LAKE_LEVEL_GRID / 2;
+		int ref_x = ((p_world_x + half) / LAKE_LEVEL_GRID) * LAKE_LEVEL_GRID;
+		int ref_z = ((p_world_z + half) / LAKE_LEVEL_GRID) * LAKE_LEVEL_GRID;
+
+		float ref_weights[BIOME_MAX];
+		_get_biome_weights(ref_x, ref_z, ref_weights);
+		BiomeParams ref_params = _get_blended_params(ref_weights);
+		float ref_height = _get_base_height(ref_x, ref_z, ref_params);
+
+		if (ref_height > (float)(sea_level + 5)) {
+			int lake_surface = (int)(ref_height - LAKE_MAX_DEPTH * 0.5f);
+			if (lake_surface < sea_level + 1) {
+				lake_surface = sea_level + 1;
+			}
+			if (lake_surface > water_level) {
+				water_level = lake_surface;
+			}
 		}
 	}
 
@@ -418,6 +447,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	float river_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	float river_bank_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	float lake_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+	float lake_bank_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	int local_water_levels[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	int surface_y_cache[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 
@@ -438,9 +468,15 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			float rf = _get_river_factor(wx, wz);
 			float rbf = _get_river_bank_factor(wx, wz);
 			float lf = _get_lake_factor(wx, wz);
+			float lbf = _get_lake_bank_factor(wx, wz);
 			river_factors[x][z] = rf;
 			river_bank_factors[x][z] = rbf;
 			lake_factors[x][z] = lf;
+			lake_bank_factors[x][z] = lbf;
+
+			// Compute lake water level early (needed for bank blending).
+			int wl = _get_local_water_level(wx, wz);
+			local_water_levels[x][z] = wl;
 
 			// Carve rivers.
 			float river_bed = (float)(sea_level - RIVER_BED_OFFSET);
@@ -448,10 +484,10 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				bh = Math::lerp(bh, river_bed, rf);
 			}
 
-			// Bank blending.
+			// River bank blending.
 			if (rbf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
 				float bank_target = (float)(sea_level + 1);
-				bh = Math::lerp(bh, bank_target, rbf * 0.5f);
+				bh = Math::lerp(bh, bank_target, rbf * 0.85f);
 			}
 
 			// Carve lakes.
@@ -459,8 +495,13 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				bh -= lf * LAKE_MAX_DEPTH;
 			}
 
+			// Lake bank blending — slope terrain down to lake shore.
+			if (lbf > 0.0f && bh > (float)(wl + 1)) {
+				float bank_target = (float)(wl + 1);
+				bh = Math::lerp(bh, bank_target, lbf * 0.8f);
+			}
+
 			base_heights[x][z] = bh;
-			local_water_levels[x][z] = _get_local_water_level(wx, wz, original_base_heights[x][z]);
 			surface_y_cache[x][z] = 0;
 		}
 	}
@@ -506,11 +547,13 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			float rf = river_factors[x][z];
 			float rbf = river_bank_factors[x][z];
 			float lf = lake_factors[x][z];
+			float lbf = lake_bank_factors[x][z];
 			const BiomeParams &bp = blended[x][z];
 
 			bool is_water_body = (rf > 0.0f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
 					(rbf > 0.3f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
-					(lf > 0.0f && original_base_heights[x][z] > (float)(sea_level + 5));
+					(lf > 0.0f && original_base_heights[x][z] > (float)(sea_level + 5)) ||
+					(lbf > 0.3f && original_base_heights[x][z] > (float)(sea_level + 5));
 
 			for (int y = CHUNK_SIZE_Y - 1; y >= 1; y--) {
 				int idx = block_index(x, y, z);
@@ -596,11 +639,12 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				continue;
 			}
 
-			// Skip trees in water bodies and river banks.
+			// Skip trees in water bodies, river banks, and lake banks.
 			float rf = _get_river_factor(wx, wz);
 			float rbf = _get_river_bank_factor(wx, wz);
 			float lf = _get_lake_factor(wx, wz);
-			if (rf > 0.0f || rbf > 0.0f || lf > 0.0f) {
+			float lbf = _get_lake_bank_factor(wx, wz);
+			if (rf > 0.0f || rbf > 0.0f || lf > 0.0f || lbf > 0.0f) {
 				continue;
 			}
 

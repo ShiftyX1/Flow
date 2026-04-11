@@ -48,11 +48,13 @@ public:
 
 	// Water feature constants.
 	static constexpr float RIVER_WIDTH = 0.07f;
-	static constexpr float RIVER_BANK_WIDTH = 0.04f;
+	static constexpr float RIVER_BANK_WIDTH = 0.06f;
 	static constexpr int RIVER_BED_OFFSET = 2;
 	static constexpr int RIVER_MIN_HEIGHT = 5;
 	static constexpr float LAKE_THRESHOLD = 0.35f;
 	static constexpr float LAKE_MAX_DEPTH = 6.0f;
+	static constexpr float LAKE_BANK_WIDTH = 0.10f;
+	static constexpr int LAKE_LEVEL_GRID = 64;
 	static constexpr float OCEAN_THRESHOLD = -0.3f;
 	static constexpr float OCEAN_DEPTH_SCALE = 15.0f;
 
@@ -96,7 +98,8 @@ private:
 	float _get_river_factor(int p_world_x, int p_world_z) const;
 	float _get_river_bank_factor(int p_world_x, int p_world_z) const;
 	float _get_lake_factor(int p_world_x, int p_world_z) const;
-	int _get_local_water_level(int p_world_x, int p_world_z, float p_base_height) const;
+	float _get_lake_bank_factor(int p_world_x, int p_world_z) const;
+	int _get_local_water_level(int p_world_x, int p_world_z) const;
 
 	bool _should_place_tree(int p_world_x, int p_world_z, int p_tree_density) const;
 	int _tree_trunk_height(int p_world_x, int p_world_z) const;

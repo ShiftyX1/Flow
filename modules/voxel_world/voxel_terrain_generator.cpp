@@ -18,10 +18,10 @@ static _FORCE_INLINE_ uint32_t _hash_u32(uint32_t x) {
 
 //                                                    height_base  height_scale  detail_scale  density_3d  surface             subsurface          tree_density  snow_line
 const BiomeParams VoxelTerrainGenerator::BIOME_TABLE[BIOME_MAX] = {
-	/* DESERT    */ { 0.0f, 8.0f, 1.0f, 3.0f, VOXEL_BLOCK_SAND, VOXEL_BLOCK_SAND, 0, 999 },
-	/* MEADOW    */ { 0.0f, 15.0f, 3.0f, 5.0f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT, 120, 55 },
-	/* FOREST    */ { 2.0f, 18.0f, 4.0f, 5.0f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT, 25, 55 },
-	/* MOUNTAINS */ { 10.0f, 30.0f, 8.0f, 8.0f, VOXEL_BLOCK_STONE, VOXEL_BLOCK_STONE, 300, 40 },
+	/* DESERT    */ { 0.0f,  8.0f,  1.0f,  3.0f, VOXEL_BLOCK_SAND,  VOXEL_BLOCK_SAND,  0,   999 },
+	/* MEADOW    */ { 0.0f, 15.0f,  3.0f,  5.0f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  120, 165 },
+	/* FOREST    */ { 2.0f, 18.0f,  4.0f,  5.0f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  25,  165 },
+	/* MOUNTAINS */ { 30.0f, 85.0f, 25.0f, 14.0f, VOXEL_BLOCK_STONE, VOXEL_BLOCK_STONE, 300, 115 },
 };
 
 // Biome centers in (temperature, humidity) space. Noise outputs are in [-1, 1].
@@ -72,7 +72,7 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	// --- Spaghetti cave noise A (OpenSimplex2, 3D). ---
 	cave_noise_a.instantiate();
 	cave_noise_a->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
-	cave_noise_a->set_frequency(0.03f);
+	cave_noise_a->set_frequency(0.015f);
 	cave_noise_a->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
 	cave_noise_a->set_fractal_octaves(2);
 	cave_noise_a->set_fractal_lacunarity(2.0f);
@@ -81,11 +81,18 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	// --- Spaghetti cave noise B (OpenSimplex2, 3D, offset frequency). ---
 	cave_noise_b.instantiate();
 	cave_noise_b->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
-	cave_noise_b->set_frequency(0.035f);
+	cave_noise_b->set_frequency(0.018f);
 	cave_noise_b->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
 	cave_noise_b->set_fractal_octaves(2);
 	cave_noise_b->set_fractal_lacunarity(2.0f);
 	cave_noise_b->set_fractal_gain(0.5f);
+
+	// --- Cheese cave noise (OpenSimplex2, 3D, very low frequency — large open chambers). ---
+	cave_cheese_noise.instantiate();
+	cave_cheese_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
+	cave_cheese_noise->set_frequency(0.007f);
+	cave_cheese_noise->set_fractal_type(FastNoiseLite::FRACTAL_NONE);
+	cave_cheese_noise->set_fractal_octaves(1);
 
 	// --- River noise: 2D ridged noise for thin winding channels. ---
 	river_noise.instantiate();
@@ -144,6 +151,7 @@ void VoxelTerrainGenerator::set_seed(int p_seed) {
 	density_detail_noise->set_seed(p_seed + 20);
 	cave_noise_a->set_seed(p_seed + 100);
 	cave_noise_b->set_seed(p_seed + 200);
+	cave_cheese_noise->set_seed(p_seed + 250);
 	river_noise->set_seed(p_seed + 300);
 	river_warp_noise->set_seed(p_seed + 400);
 	lake_noise->set_seed(p_seed + 500);
@@ -664,15 +672,23 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				float threshold = (y >= sh - 2) ? CAVE_SURFACE_THRESHOLD : CAVE_THRESHOLD;
 
 				float na = Math::abs(cave_noise_a->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz));
-				if (na >= threshold) {
-					continue;
+				float nb = Math::abs(cave_noise_b->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz));
+				bool spaghetti = (na < threshold && nb < threshold);
+
+				// Cheese caves: large open chambers, restricted to deep underground
+				// (lower 65% of the column, well below y=4).
+				bool cheese = false;
+				if (!spaghetti && y > 4 && sh > 0) {
+					float depth_factor = (float)(sh - y) / (float)sh;
+					if (depth_factor > 0.35f) {
+						float nc = cave_cheese_noise->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz);
+						cheese = (nc > CAVE_CHEESE_THRESHOLD);
+					}
 				}
 
-				float nb = Math::abs(cave_noise_b->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz));
-				if (nb >= threshold) {
-					continue;
+				if (spaghetti || cheese) {
+					blocks_w[idx] = VOXEL_BLOCK_AIR;
 				}
-				blocks_w[idx] = VOXEL_BLOCK_AIR;
 			}
 		}
 	}

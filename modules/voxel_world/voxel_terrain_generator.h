@@ -31,7 +31,7 @@ struct BiomeParams {
 class VoxelTerrainGenerator {
 public:
 	static const int CHUNK_SIZE_X = 16;
-	static const int CHUNK_SIZE_Y = 64;
+	static const int CHUNK_SIZE_Y = 192;
 	static const int CHUNK_SIZE_Z = 16;
 
 	// Maximum number of biomes supported when using a VoxelBiomeRegistry.
@@ -44,11 +44,12 @@ public:
 	static const int TREE_CANOPY_RADIUS = 2;
 
 	// 3D density terrain constants (defaults, overridden per-biome).
-	static constexpr float BASE_HEIGHT = 32.0f;
+	static constexpr float BASE_HEIGHT = 64.0f;
 	static constexpr float SQUISH_FACTOR = 0.12f;
 
-	static constexpr float CAVE_THRESHOLD = 0.10f;        // abs(noise) < threshold → carve tunnel
-	static constexpr float CAVE_SURFACE_THRESHOLD = 0.04f; // tighter near surface → almost no caves
+	static constexpr float CAVE_THRESHOLD = 0.16f;        // abs(noise) < threshold → carve tunnel
+	static constexpr float CAVE_SURFACE_THRESHOLD = 0.05f; // tighter near surface → almost no caves
+	static constexpr float CAVE_CHEESE_THRESHOLD = 0.26f;  // cheese > threshold → carve open chamber
 
 	// Water feature constants.
 	static constexpr float RIVER_WIDTH = 0.07f;
@@ -78,6 +79,8 @@ private:
 	// Spaghetti cave noise pair — guaranteed tunnel networks.
 	Ref<FastNoiseLite> cave_noise_a;
 	Ref<FastNoiseLite> cave_noise_b;
+	// Cheese cave noise — large open chambers deep underground.
+	Ref<FastNoiseLite> cave_cheese_noise;
 
 	// Water feature noise layers.
 	Ref<FastNoiseLite> river_noise;
@@ -89,7 +92,7 @@ private:
 	Ref<FastNoiseLite> humidity_noise;
 
 	int seed = 0;
-	int sea_level = 20;
+	int sea_level = 40;
 
 	Ref<VoxelBiomeRegistry> biome_registry;
 

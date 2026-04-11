@@ -333,38 +333,9 @@ float VoxelTerrainGenerator::_get_lake_bank_factor(int p_world_x, int p_world_z)
 }
 
 int VoxelTerrainGenerator::_get_local_water_level(int p_world_x, int p_world_z) const {
-	int water_level = sea_level;
-
-	float lake_f = _get_lake_factor(p_world_x, p_world_z);
-
-	// Rivers: water surface is always at sea_level — guarantees flat,
-	// continuous water across the entire river, connecting to oceans.
-
-	// Lakes: compute a UNIFORM water level for the entire lake basin.
-	// Snap coordinates to a coarse grid so all columns in a lake share
-	// the same reference height → perfectly flat water surface.
-	if (lake_f > 0.0f) {
-		int half = LAKE_LEVEL_GRID / 2;
-		int ref_x = ((p_world_x + half) / LAKE_LEVEL_GRID) * LAKE_LEVEL_GRID;
-		int ref_z = ((p_world_z + half) / LAKE_LEVEL_GRID) * LAKE_LEVEL_GRID;
-
-		float ref_weights[BIOME_MAX];
-		_get_biome_weights(ref_x, ref_z, ref_weights);
-		BiomeParams ref_params = _get_blended_params(ref_weights);
-		float ref_height = _get_base_height(ref_x, ref_z, ref_params);
-
-		if (ref_height > (float)(sea_level + 5)) {
-			int lake_surface = (int)(ref_height - LAKE_MAX_DEPTH * 0.5f);
-			if (lake_surface < sea_level + 1) {
-				lake_surface = sea_level + 1;
-			}
-			if (lake_surface > water_level) {
-				water_level = lake_surface;
-			}
-		}
-	}
-
-	return water_level;
+	// Always return sea_level: lakes are carved below sea_level and water
+	// fills naturally from below. This eliminates cross-chunk water walls.
+	return sea_level;
 }
 
 // --- Tree helpers ---
@@ -462,6 +433,22 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			_get_biome_weights(wx, wz, weights);
 			blended[x][z] = _get_blended_params(weights);
 
+			// Dithered surface block: probabilistic selection by biome weights
+			// eliminates the hard colour snap at biome borders.
+			{
+				uint32_t bseed = _hash_u32((uint32_t)seed ^ ((uint32_t)wx * 374761393U) ^ ((uint32_t)wz * 668265263U));
+				float r = (float)(bseed & 0xFFFFu) * (1.0f / 65536.0f);
+				float cumul = 0.0f;
+				for (int bi = 0; bi < BIOME_MAX; bi++) {
+					cumul += weights[bi];
+					if (r < cumul) {
+						blended[x][z].surface_block = BIOME_TABLE[bi].surface_block;
+						blended[x][z].subsurface_block = BIOME_TABLE[bi].subsurface_block;
+						break;
+					}
+				}
+			}
+
 			float bh = _get_base_height(wx, wz, blended[x][z]);
 			original_base_heights[x][z] = bh;
 
@@ -490,9 +477,11 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				bh = Math::lerp(bh, bank_target, rbf * 0.85f);
 			}
 
-			// Carve lakes.
-			if (lf > 0.0f && bh > (float)(sea_level + 5)) {
-				bh -= lf * LAKE_MAX_DEPTH;
+			// Carve lakes: push terrain below sea_level at the basin centre
+			// so water fills naturally at sea_level regardless of terrain altitude.
+			if (lf > 0.0f) {
+				float excess = (bh - (float)sea_level + 3.0f > 0.0f) ? (bh - (float)sea_level + 3.0f) : 0.0f;
+				bh -= lf * (LAKE_MAX_DEPTH + excess);
 			}
 
 			// Lake bank blending — slope terrain down to lake shore.
@@ -552,8 +541,8 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 
 			bool is_water_body = (rf > 0.0f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
 					(rbf > 0.3f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
-					(lf > 0.0f && original_base_heights[x][z] > (float)(sea_level + 5)) ||
-					(lbf > 0.3f && original_base_heights[x][z] > (float)(sea_level + 5));
+					(lf > 0.0f) ||
+					(lbf > 0.3f);
 
 			for (int y = CHUNK_SIZE_Y - 1; y >= 1; y--) {
 				int idx = block_index(x, y, z);
@@ -608,20 +597,21 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 					continue;
 				}
 
-				float threshold = CAVE_THRESHOLD;
-				if (y >= sh - 2) {
-					threshold = CAVE_SURFACE_THRESHOLD;
-				}
+				// Spaghetti caves: carve only where BOTH noise values are near
+				// zero (|n| < threshold). Zero-crossings in 3D form thin sheets
+				// that intersect as continuous winding tunnels.
+				float threshold = (y >= sh - 2) ? CAVE_SURFACE_THRESHOLD : CAVE_THRESHOLD;
 
-				real_t na = cave_noise_a->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz);
-				if (na < threshold) {
+				float na = Math::abs(cave_noise_a->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz));
+				if (na >= threshold) {
 					continue;
 				}
 
-				real_t nb = cave_noise_b->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz);
+				float nb = Math::abs(cave_noise_b->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz));
 				if (nb >= threshold) {
-					blocks_w[idx] = VOXEL_BLOCK_AIR;
+					continue;
 				}
+				blocks_w[idx] = VOXEL_BLOCK_AIR;
 			}
 		}
 	}

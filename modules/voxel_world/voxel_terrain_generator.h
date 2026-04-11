@@ -43,8 +43,8 @@ public:
 	static constexpr float BASE_HEIGHT = 32.0f;
 	static constexpr float SQUISH_FACTOR = 0.12f;
 
-	static constexpr float CAVE_THRESHOLD = 0.15f;
-	static constexpr float CAVE_SURFACE_THRESHOLD = 0.35f;
+	static constexpr float CAVE_THRESHOLD = 0.10f;        // abs(noise) < threshold → carve tunnel
+	static constexpr float CAVE_SURFACE_THRESHOLD = 0.04f; // tighter near surface → almost no caves
 
 	// Water feature constants.
 	static constexpr float RIVER_WIDTH = 0.07f;

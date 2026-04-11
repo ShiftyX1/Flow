@@ -48,7 +48,7 @@ void VoxelMesher::add_face(
 	}
 }
 
-Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags) {
+Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags, const NeighborBlocks &p_neighbors) {
 	const int CX = VoxelTerrainGenerator::CHUNK_SIZE_X;
 	const int CY = VoxelTerrainGenerator::CHUNK_SIZE_Y;
 	const int CZ = VoxelTerrainGenerator::CHUNK_SIZE_Z;
@@ -96,7 +96,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 				// For non-solid blocks (water with shader): show face only where neighbor is air.
 				// For solid blocks: show face where neighbor is transparent or alpha-flagged.
 				auto should_show_face = [&](int nx, int ny, int nz) -> bool {
-					VoxelBlockType neighbor = get_block(blocks, nx, ny, nz);
+					VoxelBlockType neighbor = get_block(blocks, nx, ny, nz, p_neighbors);
 					if (!solid) {
 						// Non-solid shader blocks: only show face against air.
 						return neighbor == VOXEL_BLOCK_AIR;

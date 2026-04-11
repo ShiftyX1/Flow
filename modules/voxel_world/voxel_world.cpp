@@ -33,6 +33,9 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_biome_registry", "registry"), &VoxelWorld::set_biome_registry);
 	ClassDB::bind_method(D_METHOD("get_biome_registry"), &VoxelWorld::get_biome_registry);
 
+	ClassDB::bind_method(D_METHOD("set_verbose_logging", "enabled"), &VoxelWorld::set_verbose_logging);
+	ClassDB::bind_method(D_METHOD("get_verbose_logging"), &VoxelWorld::get_verbose_logging);
+
 	ClassDB::bind_method(D_METHOD("get_block_at", "world_pos"), &VoxelWorld::get_block_at);
 	ClassDB::bind_method(D_METHOD("set_block_at", "world_pos", "block_id"), &VoxelWorld::set_block_at);
 	ClassDB::bind_method(D_METHOD("get_block_name_at", "world_pos"), &VoxelWorld::get_block_name_at);
@@ -51,6 +54,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Air,Grass,Dirt,Stone,Sand,Water,Snow,Wood,Leaves,Bedrock"), "set_alpha_block_flags", "get_alpha_block_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
 
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
 	ADD_SIGNAL(MethodInfo("block_broken", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "old_block_id")));
@@ -124,10 +128,14 @@ void VoxelWorld::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_READY: {
 			if (Engine::get_singleton()->is_editor_hint()) {
-				print_line("[VoxelWorld] Editor mode — skipping generation.");
+				if (verbose_logging) {
+					print_line("[VoxelWorld] Editor mode — skipping generation.");
+				}
 				return;
 			}
-			print_line("[VoxelWorld] NOTIFICATION_READY received, initializing...");
+			if (verbose_logging) {
+				print_line("[VoxelWorld] NOTIFICATION_READY received, initializing...");
+			}
 			set_process(true);
 			_initialize_world();
 		} break;
@@ -152,7 +160,9 @@ void VoxelWorld::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_EXIT_TREE: {
-			print_line("[VoxelWorld] NOTIFICATION_EXIT_TREE — cleaning up.");
+			if (verbose_logging) {
+				print_line("[VoxelWorld] NOTIFICATION_EXIT_TREE — cleaning up.");
+			}
 			_cleanup_world();
 		} break;
 	}
@@ -173,13 +183,17 @@ void VoxelWorld::_initialize_world() {
 	generator->set_sea_level(sea_level);
 	generator->set_biome_registry(biome_registry);
 
-	print_line("[VoxelWorld] Seed: " + itos(effective_seed) + ", sea_level: " + itos(sea_level) + ", block_size: " + rtos(block_size) + ", load_radius: " + itos(chunk_load_radius));
+	if (verbose_logging) {
+		print_line("[VoxelWorld] Seed: " + itos(effective_seed) + ", sea_level: " + itos(sea_level) + ", block_size: " + rtos(block_size) + ", load_radius: " + itos(chunk_load_radius));
+	}
 
 	// If no registry assigned, create one with defaults.
 	if (block_registry.is_null()) {
 		block_registry.instantiate();
 		block_registry->setup_defaults();
-		print_line("[VoxelWorld] No block registry set — created default registry with " + itos(block_registry->get_block_count()) + " blocks.");
+		if (verbose_logging) {
+			print_line("[VoxelWorld] No block registry set — created default registry with " + itos(block_registry->get_block_count()) + " blocks.");
+		}
 	}
 
 	material.instantiate();
@@ -189,7 +203,9 @@ void VoxelWorld::_initialize_world() {
 
 	initialized = true;
 
-	print_line("[VoxelWorld] World initialized. Generating initial chunks around origin...");
+	if (verbose_logging) {
+		print_line("[VoxelWorld] World initialized. Generating initial chunks around origin...");
+	}
 	_update_chunks(Vector3(0, 0, 0));
 }
 
@@ -198,6 +214,11 @@ void VoxelWorld::_cleanup_world() {
 		WorkerThreadPool::get_singleton()->wait_for_task_completion(E.value);
 	}
 	pending_chunks.clear();
+
+	for (const KeyValue<Vector2i, int64_t> &E : pending_remesh) {
+		WorkerThreadPool::get_singleton()->wait_for_task_completion(E.value);
+	}
+	pending_remesh.clear();
 
 	{
 		MutexLock lock(finished_mutex);
@@ -208,7 +229,9 @@ void VoxelWorld::_cleanup_world() {
 	for (const KeyValue<Vector2i, VoxelChunk *> &E : loaded_chunks) {
 		keys.push_back(E.key);
 	}
-	print_line("[VoxelWorld] Cleanup: unloading " + itos(keys.size()) + " chunks...");
+	if (verbose_logging) {
+		print_line("[VoxelWorld] Cleanup: unloading " + itos(keys.size()) + " chunks...");
+	}
 	for (int i = 0; i < keys.size(); i++) {
 		_unload_chunk(keys[i].x, keys[i].y);
 	}
@@ -222,7 +245,9 @@ void VoxelWorld::_cleanup_world() {
 	material.unref();
 	initialized = false;
 	last_camera_chunk = Vector2i(INT32_MAX, INT32_MAX);
-	print_line("[VoxelWorld] Cleanup complete.");
+	if (verbose_logging) {
+		print_line("[VoxelWorld] Cleanup complete.");
+	}
 }
 
 void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
@@ -237,7 +262,9 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 	if (current_chunk == last_camera_chunk) {
 		return;
 	}
-	print_line("[VoxelWorld] Camera moved to chunk (" + itos(cam_cx) + ", " + itos(cam_cz) + "), updating chunks...");
+	if (verbose_logging) {
+		print_line("[VoxelWorld] Camera moved to chunk (" + itos(cam_cx) + ", " + itos(cam_cz) + "), updating chunks...");
+	}
 	last_camera_chunk = current_chunk;
 
 	HashMap<Vector2i, bool> desired_chunks;
@@ -254,7 +281,7 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 			to_unload.push_back(E.key);
 		}
 	}
-	if (to_unload.size() > 0) {
+	if (to_unload.size() > 0 && verbose_logging) {
 		print_line("[VoxelWorld] Unloading " + itos(to_unload.size()) + " chunks.");
 	}
 	for (int i = 0; i < to_unload.size(); i++) {
@@ -278,7 +305,7 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 			requested_count++;
 		}
 	}
-	if (requested_count > 0) {
+	if (requested_count > 0 && verbose_logging) {
 		print_line("[VoxelWorld] Requested " + itos(requested_count) + " chunks for background generation. Pending: " + itos(pending_chunks.size()) + ".");
 	}
 }
@@ -290,8 +317,22 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 
 	ChunkTaskResult result;
 	result.key = data->key;
-	result.blocks = world->generator->generate_chunk_data(data->chunk_x, data->chunk_z);
-	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, world->alpha_block_flags);
+	result.is_remesh = data->is_remesh;
+
+	if (data->is_remesh) {
+		result.blocks = data->pre_blocks;
+	} else {
+		result.blocks = world->generator->generate_chunk_data(data->chunk_x, data->chunk_z);
+	}
+
+	// Build NeighborBlocks from snapshots captured on the main thread at queue time.
+	VoxelMesher::NeighborBlocks nb;
+	if (data->neighbor_px.size() > 0) { nb.px = data->neighbor_px.ptr(); }
+	if (data->neighbor_nx.size() > 0) { nb.nx = data->neighbor_nx.ptr(); }
+	if (data->neighbor_pz.size() > 0) { nb.pz = data->neighbor_pz.ptr(); }
+	if (data->neighbor_nz.size() > 0) { nb.nz = data->neighbor_nz.ptr(); }
+
+	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, world->alpha_block_flags, nb);
 
 	{
 		MutexLock lock(world->finished_mutex);
@@ -313,10 +354,127 @@ void VoxelWorld::_request_chunk(int p_cx, int p_cz) {
 	task_data->chunk_x = p_cx;
 	task_data->chunk_z = p_cz;
 
+	// Snapshot loaded neighbour block arrays so the background thread can build seam-free meshes.
+	auto snapshot_nb = [&](int dx, int dz) -> Vector<uint8_t> {
+		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_cx + dx, p_cz + dz));
+		return nb ? (*nb)->get_blocks() : Vector<uint8_t>();
+	};
+	task_data->neighbor_px = snapshot_nb(1, 0);
+	task_data->neighbor_nx = snapshot_nb(-1, 0);
+	task_data->neighbor_pz = snapshot_nb(0, 1);
+	task_data->neighbor_nz = snapshot_nb(0, -1);
+
 	int64_t task_id = WorkerThreadPool::get_singleton()->add_native_task(
 			&VoxelWorld::_chunk_generation_task, task_data, false, "VoxelChunkGen");
 
 	pending_chunks[key] = task_id;
+}
+
+// ----- Chunk mesh helpers -----
+
+void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<VoxelMesher::MeshSurface> &p_surfaces) {
+	// Remove old mesh instance if any.
+	MeshInstance3D *old_mi = p_chunk->get_mesh_instance();
+	if (old_mi) {
+		if (old_mi->get_parent() == this) {
+			remove_child(old_mi);
+		}
+		memdelete(old_mi);
+		p_chunk->set_mesh_instance(nullptr);
+	}
+
+	if (p_surfaces.size() == 0) {
+		return;
+	}
+
+	Ref<ArrayMesh> array_mesh;
+	array_mesh.instantiate();
+
+	for (int s = 0; s < p_surfaces.size(); s++) {
+		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, p_surfaces[s].arrays);
+		if (p_surfaces[s].shader_material.is_valid()) {
+			Ref<ShaderMaterial> mat = p_surfaces[s].shader_material;
+			if (p_surfaces[s].texture.is_valid() && mat->get_shader().is_valid()) {
+				mat->set_shader_parameter("texture_albedo", p_surfaces[s].texture);
+			}
+			array_mesh->surface_set_material(s, mat);
+		} else if (p_surfaces[s].texture.is_valid()) {
+			Ref<StandardMaterial3D> mat;
+			mat.instantiate();
+			mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, p_surfaces[s].texture);
+			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+			mat->set_texture_filter(texture_filter);
+
+			int btype = p_surfaces[s].block_type;
+			if (btype >= 0 && (alpha_block_flags & (1 << btype))) {
+				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+				mat->set_alpha_scissor_threshold(0.5f);
+			}
+			array_mesh->surface_set_material(s, mat);
+		} else if (material.is_valid()) {
+			array_mesh->surface_set_material(s, material);
+		}
+	}
+
+	MeshInstance3D *mi = memnew(MeshInstance3D);
+	mi->set_mesh(array_mesh);
+
+	Vector2i cpos = p_chunk->get_chunk_pos();
+	float world_x = cpos.x * VoxelChunk::SIZE_X * block_size;
+	float world_z = cpos.y * VoxelChunk::SIZE_Z * block_size;
+	mi->set_position(Vector3(world_x, 0, world_z));
+
+	p_chunk->set_mesh_instance(mi);
+	add_child(mi);
+	mi->set_owner(nullptr);
+}
+
+// Rebuild a chunk mesh synchronously on the main thread (used in set_block_at for immediate feedback).
+void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
+	Vector2i cpos = p_chunk->get_chunk_pos();
+	VoxelMesher::NeighborBlocks nb;
+	auto snap = [&](int dx, int dz) -> const uint8_t * {
+		VoxelChunk *const *n = loaded_chunks.getptr(Vector2i(cpos.x + dx, cpos.y + dz));
+		return n ? (*n)->get_blocks().ptr() : nullptr;
+	};
+	nb.px = snap(1, 0);
+	nb.nx = snap(-1, 0);
+	nb.pz = snap(0, 1);
+	nb.nz = snap(0, -1);
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(
+			p_chunk->get_blocks(), block_size, block_registry, alpha_block_flags, nb);
+	_apply_surfaces_to_chunk(p_chunk, surfaces);
+}
+
+// Queue an async background remesh for an already-loaded chunk.
+void VoxelWorld::_request_remesh(const Vector2i &p_key) {
+	// Skip if a regular load or remesh is already in flight for this key.
+	if (pending_chunks.has(p_key) || pending_remesh.has(p_key)) {
+		return;
+	}
+	VoxelChunk *const *chunk_ptr = loaded_chunks.getptr(p_key);
+	if (!chunk_ptr) {
+		return;
+	}
+
+	ChunkTaskData *task_data = memnew(ChunkTaskData);
+	task_data->world = this;
+	task_data->key = p_key;
+	task_data->is_remesh = true;
+	task_data->pre_blocks = (*chunk_ptr)->get_blocks(); // snapshot
+
+	auto snapshot_nb = [&](int dx, int dz) -> Vector<uint8_t> {
+		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_key.x + dx, p_key.y + dz));
+		return nb ? (*nb)->get_blocks() : Vector<uint8_t>();
+	};
+	task_data->neighbor_px = snapshot_nb(1, 0);
+	task_data->neighbor_nx = snapshot_nb(-1, 0);
+	task_data->neighbor_pz = snapshot_nb(0, 1);
+	task_data->neighbor_nz = snapshot_nb(0, -1);
+
+	int64_t task_id = WorkerThreadPool::get_singleton()->add_native_task(
+			&VoxelWorld::_chunk_generation_task, task_data, false, "VoxelChunkRemesh");
+	pending_remesh[p_key] = task_id;
 }
 
 void VoxelWorld::_integrate_finished_chunks() {
@@ -335,6 +493,22 @@ void VoxelWorld::_integrate_finished_chunks() {
 	for (int i = 0; i < to_integrate.size(); i++) {
 		const ChunkTaskResult &result = to_integrate[i];
 
+		if (result.is_remesh) {
+			// Complete the remesh task.
+			int64_t *task_id_ptr = pending_remesh.getptr(result.key);
+			if (task_id_ptr) {
+				WorkerThreadPool::get_singleton()->wait_for_task_completion(*task_id_ptr);
+				pending_remesh.erase(result.key);
+			}
+			// Apply updated surfaces to the existing chunk (if still loaded).
+			VoxelChunk *const *chunk_ptr = loaded_chunks.getptr(result.key);
+			if (chunk_ptr) {
+				_apply_surfaces_to_chunk(*chunk_ptr, result.surfaces);
+			}
+			// Remesh results don't count toward the per-frame integration limit.
+			continue;
+		}
+
 		int64_t *task_id_ptr = pending_chunks.getptr(result.key);
 		if (task_id_ptr) {
 			WorkerThreadPool::get_singleton()->wait_for_task_completion(*task_id_ptr);
@@ -352,51 +526,19 @@ void VoxelWorld::_integrate_finished_chunks() {
 		chunk->set_chunk_pos(result.key);
 		chunk->set_blocks(result.blocks);
 
-		if (result.surfaces.size() > 0) {
-			Ref<ArrayMesh> array_mesh;
-			array_mesh.instantiate();
+		// Register the chunk and apply the pre-built surfaces (built off-thread).
+		loaded_chunks[result.key] = chunk;
+		_apply_surfaces_to_chunk(chunk, result.surfaces);
 
-			for (int s = 0; s < result.surfaces.size(); s++) {
-				array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, result.surfaces[s].arrays);
-				if (result.surfaces[s].shader_material.is_valid()) {
-					Ref<ShaderMaterial> mat = result.surfaces[s].shader_material;
-					if (result.surfaces[s].texture.is_valid() && mat->get_shader().is_valid()) {
-						mat->set_shader_parameter("texture_albedo", result.surfaces[s].texture);
-					}
-					array_mesh->surface_set_material(s, mat);
-				} else if (result.surfaces[s].texture.is_valid()) {
-					Ref<StandardMaterial3D> mat;
-					mat.instantiate();
-					mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, result.surfaces[s].texture);
-					mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
-					mat->set_texture_filter(texture_filter);
-
-					// Enable alpha transparency if this block type is flagged.
-					int btype = result.surfaces[s].block_type;
-					if (btype >= 0 && (alpha_block_flags & (1 << btype))) {
-						mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-						mat->set_alpha_scissor_threshold(0.5f);
-					}
-
-					array_mesh->surface_set_material(s, mat);
-				} else if (material.is_valid()) {
-					array_mesh->surface_set_material(s, material);
-				}
-			}
-
-			MeshInstance3D *mi = memnew(MeshInstance3D);
-			mi->set_mesh(array_mesh);
-
-			float world_x = result.key.x * VoxelChunk::SIZE_X * block_size;
-			float world_z = result.key.y * VoxelChunk::SIZE_Z * block_size;
-			mi->set_position(Vector3(world_x, 0, world_z));
-
-			chunk->set_mesh_instance(mi);
-			add_child(mi);
-			mi->set_owner(nullptr);
+		// Queue async remesh for the four loaded cardinal neighbours so their
+		// border faces are updated with awareness of this newly arrived chunk.
+		const Vector2i dirs[4] = {
+			Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)
+		};
+		for (int d = 0; d < 4; d++) {
+			_request_remesh(result.key + dirs[d]);
 		}
 
-		loaded_chunks[result.key] = chunk;
 		integrated++;
 
 		if (integrated >= chunks_per_frame) {
@@ -410,7 +552,7 @@ void VoxelWorld::_integrate_finished_chunks() {
 		}
 	}
 
-	if (integrated > 0) {
+	if (integrated > 0 && verbose_logging) {
 		print_verbose("[VoxelWorld] Integrated " + itos(integrated) + " chunks this frame. Total loaded: " + itos(loaded_chunks.size()) + ".");
 	}
 }
@@ -431,6 +573,7 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 
 	memdelete(chunk);
 	loaded_chunks.erase(key);
+	pending_remesh.erase(key); // discard any pending remesh; result will be ignored
 }
 
 // --- Coordinate helpers ---
@@ -481,7 +624,9 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 	Vector2i chunk_key = _world_to_chunk(p_world_pos);
 	VoxelChunk **chunk_ptr = loaded_chunks.getptr(chunk_key);
 	if (!chunk_ptr) {
-		print_line("[VoxelWorld] set_block_at: chunk not loaded at (" + itos(chunk_key.x) + ", " + itos(chunk_key.y) + ").");
+		if (verbose_logging) {
+			print_line("[VoxelWorld] set_block_at: chunk not loaded at (" + itos(chunk_key.x) + ", " + itos(chunk_key.y) + ").");
+		}
 		return;
 	}
 	Vector3i local = _world_to_local_block(p_world_pos);
@@ -490,8 +635,22 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 	int old_id = (int)chunk->get_block(local.x, local.y, local.z);
 	chunk->set_block(local.x, local.y, local.z, (VoxelBlockType)p_block_id);
 
-	// Rebuild the chunk mesh.
-	chunk->rebuild_mesh(block_size, material, block_registry, texture_filter, alpha_block_flags);
+	// Rebuild this chunk synchronously for immediate visual feedback.
+	_rebuild_chunk_mesh(chunk);
+
+	// If the changed block is on a border, queue async remesh for the affected neighbour(s).
+	if (local.x == 0) {
+		_request_remesh(Vector2i(chunk_key.x - 1, chunk_key.y));
+	}
+	if (local.x == VoxelChunk::SIZE_X - 1) {
+		_request_remesh(Vector2i(chunk_key.x + 1, chunk_key.y));
+	}
+	if (local.z == 0) {
+		_request_remesh(Vector2i(chunk_key.x, chunk_key.y - 1));
+	}
+	if (local.z == VoxelChunk::SIZE_Z - 1) {
+		_request_remesh(Vector2i(chunk_key.x, chunk_key.y + 1));
+	}
 
 	Vector3i block_pos = world_to_block_pos(p_world_pos);
 

@@ -21,8 +21,8 @@ void VoxelChunk::set_block(int p_x, int p_y, int p_z, VoxelBlockType p_type) {
 	blocks.write[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)] = (uint8_t)p_type;
 }
 
-MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags) {
-	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags);
+MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags, const VoxelMesher::NeighborBlocks &p_neighbors) {
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags, p_neighbors);
 
 	if (surfaces.size() == 0) {
 		return nullptr;
@@ -66,8 +66,8 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 	return mesh_instance;
 }
 
-void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags) {
-	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags);
+void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags, const VoxelMesher::NeighborBlocks &p_neighbors) {
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags, p_neighbors);
 
 	if (!mesh_instance) {
 		return;

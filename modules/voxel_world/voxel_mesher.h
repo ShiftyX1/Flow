@@ -21,14 +21,48 @@ public:
 		int block_type = -1; // Primary block type for this surface (-1 = mixed/untextured).
 	};
 
+	// Pointers to the block arrays of the four horizontal neighbours (null = treat as air).
+	// px = +X neighbour, nx = -X neighbour, pz = +Z neighbour, nz = -Z neighbour.
+	struct NeighborBlocks {
+		const uint8_t *px = nullptr;
+		const uint8_t *nx = nullptr;
+		const uint8_t *pz = nullptr;
+		const uint8_t *nz = nullptr;
+	};
+
 	// Build multiple mesh surfaces: one per unique texture + one for untextured faces.
-	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags = 0);
+	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags = 0, const NeighborBlocks &p_neighbors = NeighborBlocks());
 
 private:
-	static _FORCE_INLINE_ VoxelBlockType get_block(const uint8_t *p_blocks, int p_x, int p_y, int p_z) {
-		if (p_x < 0 || p_x >= VoxelTerrainGenerator::CHUNK_SIZE_X ||
-				p_y < 0 || p_y >= VoxelTerrainGenerator::CHUNK_SIZE_Y ||
-				p_z < 0 || p_z >= VoxelTerrainGenerator::CHUNK_SIZE_Z) {
+	static _FORCE_INLINE_ VoxelBlockType get_block(const uint8_t *p_blocks, int p_x, int p_y, int p_z, const NeighborBlocks &p_neighbors = NeighborBlocks()) {
+		const int CX = VoxelTerrainGenerator::CHUNK_SIZE_X;
+		const int CY = VoxelTerrainGenerator::CHUNK_SIZE_Y;
+		const int CZ = VoxelTerrainGenerator::CHUNK_SIZE_Z;
+		if (p_y < 0 || p_y >= CY) {
+			return VOXEL_BLOCK_AIR;
+		}
+		if (p_x < 0) {
+			if (p_neighbors.nx) {
+				return (VoxelBlockType)p_neighbors.nx[VoxelTerrainGenerator::block_index(p_x + CX, p_y, p_z)];
+			}
+			return VOXEL_BLOCK_AIR;
+		}
+		if (p_x >= CX) {
+			if (p_neighbors.px) {
+				return (VoxelBlockType)p_neighbors.px[VoxelTerrainGenerator::block_index(p_x - CX, p_y, p_z)];
+			}
+			return VOXEL_BLOCK_AIR;
+		}
+		if (p_z < 0) {
+			if (p_neighbors.nz) {
+				return (VoxelBlockType)p_neighbors.nz[VoxelTerrainGenerator::block_index(p_x, p_y, p_z + CZ)];
+			}
+			return VOXEL_BLOCK_AIR;
+		}
+		if (p_z >= CZ) {
+			if (p_neighbors.pz) {
+				return (VoxelBlockType)p_neighbors.pz[VoxelTerrainGenerator::block_index(p_x, p_y, p_z - CZ)];
+			}
 			return VOXEL_BLOCK_AIR;
 		}
 		return (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)];

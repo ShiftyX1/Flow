@@ -27,6 +27,7 @@ private:
 	int chunks_per_frame = 4; // Max chunks to integrate into scene tree per frame.
 	uint32_t alpha_block_flags = 0; // Bitfield of AlphaBlockFlags.
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
+	bool verbose_logging = true;
 
 	Ref<VoxelBlockRegistry> block_registry;
 	Ref<VoxelBiomeRegistry> biome_registry;
@@ -45,10 +46,13 @@ private:
 		Vector2i key;
 		Vector<uint8_t> blocks;
 		Vector<VoxelMesher::MeshSurface> surfaces;
+		bool is_remesh = false; // true = update existing chunk, false = create new chunk
 	};
 
 	// Chunks currently being generated on background threads.
 	HashMap<Vector2i, int64_t> pending_chunks; // key -> WorkerThreadPool TaskID
+	// Pending mesh-rebuild tasks for already-loaded chunks.
+	HashMap<Vector2i, int64_t> pending_remesh; // key -> WorkerThreadPool TaskID
 	// Finished results waiting to be integrated on the main thread.
 	Mutex finished_mutex;
 	Vector<ChunkTaskResult> finished_chunks;
@@ -57,13 +61,24 @@ private:
 	struct ChunkTaskData {
 		VoxelWorld *world;
 		Vector2i key;
-		int chunk_x;
-		int chunk_z;
+		int chunk_x = 0;
+		int chunk_z = 0;
+		bool is_remesh = false;
+		Vector<uint8_t> pre_blocks; // block data snapshot used for remesh tasks
+		// Snapshots of loaded neighbour block arrays at task-queue time (empty = not loaded)
+		Vector<uint8_t> neighbor_px, neighbor_nx, neighbor_pz, neighbor_nz;
 	};
 	static void _chunk_generation_task(void *p_userdata);
 
 	// Integrate finished chunks into the scene tree (main thread only).
 	void _integrate_finished_chunks();
+
+	// Apply pre-built mesh surfaces to a chunk (main thread only).
+	void _apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<VoxelMesher::MeshSurface> &p_surfaces);
+	// Queue a background mesh-rebuild task for an already-loaded chunk.
+	void _request_remesh(const Vector2i &p_key);
+	// Build mesh on main thread (used only for immediate response in set_block_at).
+	void _rebuild_chunk_mesh(VoxelChunk *p_chunk);
 
 	void _initialize_world();
 	void _cleanup_world();
@@ -103,6 +118,9 @@ public:
 
 	void set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry);
 	Ref<VoxelBiomeRegistry> get_biome_registry() const;
+
+	void set_verbose_logging(bool p_enabled) { verbose_logging = p_enabled; }
+	bool get_verbose_logging() const { return verbose_logging; }
 
 	// --- Block interaction API (exposed to GDScript) ---
 

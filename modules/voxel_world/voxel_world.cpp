@@ -36,6 +36,23 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_verbose_logging", "enabled"), &VoxelWorld::set_verbose_logging);
 	ClassDB::bind_method(D_METHOD("get_verbose_logging"), &VoxelWorld::get_verbose_logging);
 
+	ClassDB::bind_method(D_METHOD("set_time_of_day", "time"), &VoxelWorld::set_time_of_day);
+	ClassDB::bind_method(D_METHOD("get_time_of_day"), &VoxelWorld::get_time_of_day);
+	ClassDB::bind_method(D_METHOD("set_day_length_seconds", "seconds"), &VoxelWorld::set_day_length_seconds);
+	ClassDB::bind_method(D_METHOD("get_day_length_seconds"), &VoxelWorld::get_day_length_seconds);
+	ClassDB::bind_method(D_METHOD("set_auto_advance_time", "enabled"), &VoxelWorld::set_auto_advance_time);
+	ClassDB::bind_method(D_METHOD("get_auto_advance_time"), &VoxelWorld::get_auto_advance_time);
+	ClassDB::bind_method(D_METHOD("set_fog_enabled", "enabled"), &VoxelWorld::set_fog_enabled);
+	ClassDB::bind_method(D_METHOD("get_fog_enabled"), &VoxelWorld::get_fog_enabled);
+	ClassDB::bind_method(D_METHOD("set_fog_distance_ratio", "ratio"), &VoxelWorld::set_fog_distance_ratio);
+	ClassDB::bind_method(D_METHOD("get_fog_distance_ratio"), &VoxelWorld::get_fog_distance_ratio);
+	ClassDB::bind_method(D_METHOD("set_sun_path", "path"), &VoxelWorld::set_sun_path);
+	ClassDB::bind_method(D_METHOD("get_sun_path"), &VoxelWorld::get_sun_path);
+	ClassDB::bind_method(D_METHOD("set_moon_path", "path"), &VoxelWorld::set_moon_path);
+	ClassDB::bind_method(D_METHOD("get_moon_path"), &VoxelWorld::get_moon_path);
+	ClassDB::bind_method(D_METHOD("set_environment_path", "path"), &VoxelWorld::set_environment_path);
+	ClassDB::bind_method(D_METHOD("get_environment_path"), &VoxelWorld::get_environment_path);
+
 	ClassDB::bind_method(D_METHOD("get_block_at", "world_pos"), &VoxelWorld::get_block_at);
 	ClassDB::bind_method(D_METHOD("set_block_at", "world_pos", "block_id"), &VoxelWorld::set_block_at);
 	ClassDB::bind_method(D_METHOD("get_block_name_at", "world_pos"), &VoxelWorld::get_block_name_at);
@@ -55,6 +72,22 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
+
+	ADD_GROUP("Day Night Cycle", "day_night_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_night_time_of_day", PROPERTY_HINT_RANGE, "0.0,24.0,0.01"), "set_time_of_day", "get_time_of_day");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_night_day_length", PROPERTY_HINT_RANGE, "10.0,3600.0,1.0,suffix:s"), "set_day_length_seconds", "get_day_length_seconds");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "day_night_auto_advance"), "set_auto_advance_time", "get_auto_advance_time");
+
+	ADD_GROUP("Fog", "fog_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "fog_enabled"), "set_fog_enabled", "get_fog_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fog_distance_ratio", PROPERTY_HINT_RANGE, "0.3,1.0,0.01"), "set_fog_distance_ratio", "get_fog_distance_ratio");
+
+	ADD_GROUP("Environment References", "env_");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "env_sun_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "DirectionalLight3D"), "set_sun_path", "get_sun_path");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "env_moon_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "DirectionalLight3D"), "set_moon_path", "get_moon_path");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "env_environment_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "WorldEnvironment"), "set_environment_path", "get_environment_path");
+
+	ADD_SIGNAL(MethodInfo("time_of_day_changed", PropertyInfo(Variant::FLOAT, "time")));
 
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
 	ADD_SIGNAL(MethodInfo("block_broken", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "old_block_id")));
@@ -124,6 +157,177 @@ Ref<VoxelBiomeRegistry> VoxelWorld::get_biome_registry() const {
 	return biome_registry;
 }
 
+// --- Day/Night Cycle setters ---
+
+void VoxelWorld::set_time_of_day(float p_time) {
+	time_of_day = Math::fmod(p_time, 24.0f);
+	if (time_of_day < 0.0f) {
+		time_of_day += 24.0f;
+	}
+}
+
+void VoxelWorld::set_day_length_seconds(float p_seconds) {
+	day_length_seconds = CLAMP(p_seconds, 10.0f, 3600.0f);
+}
+
+void VoxelWorld::set_fog_distance_ratio(float p_ratio) {
+	fog_distance_ratio = CLAMP(p_ratio, 0.3f, 1.0f);
+}
+
+void VoxelWorld::set_sun_path(const NodePath &p_path) {
+	sun_path = p_path;
+	sun_node = nullptr;
+	if (is_inside_tree()) {
+		_resolve_environment_nodes();
+	}
+}
+
+void VoxelWorld::set_moon_path(const NodePath &p_path) {
+	moon_path = p_path;
+	moon_node = nullptr;
+	if (is_inside_tree()) {
+		_resolve_environment_nodes();
+	}
+}
+
+void VoxelWorld::set_environment_path(const NodePath &p_path) {
+	environment_path = p_path;
+	env_node = nullptr;
+	if (is_inside_tree()) {
+		_resolve_environment_nodes();
+	}
+}
+
+void VoxelWorld::_resolve_environment_nodes() {
+	sun_node = nullptr;
+	moon_node = nullptr;
+	env_node = nullptr;
+
+	if (!sun_path.is_empty()) {
+		Node *n = get_node_or_null(sun_path);
+		if (n) {
+			sun_node = Object::cast_to<DirectionalLight3D>(n);
+		}
+	}
+	if (!moon_path.is_empty()) {
+		Node *n = get_node_or_null(moon_path);
+		if (n) {
+			moon_node = Object::cast_to<DirectionalLight3D>(n);
+		}
+	}
+	if (!environment_path.is_empty()) {
+		Node *n = get_node_or_null(environment_path);
+		if (n) {
+			env_node = Object::cast_to<WorldEnvironment>(n);
+		}
+	}
+}
+
+// Compute a smooth factor for how "daytime" it is. 1.0 = full day, 0.0 = full night.
+static float _compute_day_factor(float p_time) {
+	// Sunrise at 5-7, sunset at 17-19. Smooth transitions.
+	if (p_time >= 7.0f && p_time <= 17.0f) {
+		return 1.0f; // Full day.
+	} else if (p_time >= 19.0f || p_time <= 5.0f) {
+		return 0.0f; // Full night.
+	} else if (p_time > 5.0f && p_time < 7.0f) {
+		return (p_time - 5.0f) / 2.0f; // Sunrise.
+	} else {
+		return 1.0f - (p_time - 17.0f) / 2.0f; // Sunset.
+	}
+}
+
+// Compute a "sunset/sunrise" factor: peaks at dawn/dusk, zero at noon/midnight.
+static float _compute_twilight_factor(float p_time) {
+	// Peaks at 6.0 and 18.0.
+	float dawn = 1.0f - CLAMP(Math::abs(p_time - 6.0f) / 1.5f, 0.0f, 1.0f);
+	float dusk = 1.0f - CLAMP(Math::abs(p_time - 18.0f) / 1.5f, 0.0f, 1.0f);
+	return MAX(dawn, dusk);
+}
+
+void VoxelWorld::_update_day_night_cycle(float p_delta) {
+	// Advance time.
+	if (auto_advance_time && day_length_seconds > 0.0f) {
+		time_of_day += (p_delta / day_length_seconds) * 24.0f;
+		if (time_of_day >= 24.0f) {
+			time_of_day -= 24.0f;
+		}
+		emit_signal("time_of_day_changed", time_of_day);
+	}
+
+	float day_factor = _compute_day_factor(time_of_day);
+	float twilight = _compute_twilight_factor(time_of_day);
+
+	// --- Sun rotation & color ---
+	if (sun_node) {
+		// Sun angle: 6:00 = horizon (0°), 12:00 = zenith (-90°), 18:00 = opposite horizon (-180°).
+		float sun_angle = (time_of_day / 24.0f - 0.25f) * (float)Math::TAU;
+		sun_node->set_rotation(Vector3(-sun_angle, 0.0f, 0.0f));
+
+		// Sun energy: bright at noon, off at night.
+		float sun_energy = CLAMP(day_factor * 1.2f, 0.0f, 1.2f);
+		sun_node->set_param(Light3D::PARAM_ENERGY, sun_energy);
+
+		// Sun color: warm white at noon, orange at sunrise/sunset. Lerp smoothly.
+		Color noon_color(1.0f, 0.95f, 0.9f);
+		Color twilight_color(1.0f, 0.55f, 0.2f);
+		Color sun_color = noon_color.lerp(twilight_color, twilight);
+		sun_node->set_color(sun_color);
+	}
+
+	// --- Moon rotation & color ---
+	if (moon_node) {
+		float moon_angle = (time_of_day / 24.0f - 0.25f) * (float)Math::TAU + (float)Math::PI;
+		moon_node->set_rotation(Vector3(-moon_angle, 0.2f, 0.0f));
+
+		// Moon only visible at night.
+		float moon_energy = CLAMP((1.0f - day_factor) * 0.15f, 0.0f, 0.15f);
+		moon_node->set_param(Light3D::PARAM_ENERGY, moon_energy);
+		moon_node->set_color(Color(0.6f, 0.7f, 0.9f));
+	}
+
+	// --- Environment (ambient light + fog) ---
+	if (env_node) {
+		Ref<Environment> env = env_node->get_environment();
+		if (env.is_valid()) {
+			// Ambient light.
+			Color day_ambient(0.7f, 0.75f, 0.82f);
+			Color night_ambient(0.08f, 0.08f, 0.15f);
+			Color twilight_ambient(0.6f, 0.45f, 0.3f);
+			Color ambient = day_ambient.lerp(night_ambient, 1.0f - day_factor);
+			ambient = ambient.lerp(twilight_ambient, twilight * 0.5f);
+			env->set_ambient_light_color(ambient);
+			env->set_ambient_light_energy(Math::lerp(0.15f, 0.5f, day_factor));
+
+			// Fog.
+			if (fog_enabled) {
+				env->set_fog_enabled(true);
+				env->set_fog_mode(Environment::FOG_MODE_DEPTH);
+
+				float draw_dist = chunk_load_radius * VoxelTerrainGenerator::CHUNK_SIZE_X * block_size;
+				env->set_fog_depth_begin(draw_dist * 0.05f);
+				env->set_fog_depth_end(draw_dist * fog_distance_ratio);
+				env->set_fog_depth_curve(1.5f);
+
+				// Fog color matches sky feeling.
+				Color day_fog(0.6f, 0.75f, 0.92f);
+				Color night_fog(0.02f, 0.02f, 0.08f);
+				Color twilight_fog(0.85f, 0.5f, 0.25f);
+				Color fog_color = day_fog.lerp(night_fog, 1.0f - day_factor);
+				fog_color = fog_color.lerp(twilight_fog, twilight * 0.6f);
+				env->set_fog_light_color(fog_color);
+
+				env->set_fog_light_energy(Math::lerp(0.3f, 1.0f, day_factor));
+				env->set_fog_sun_scatter(Math::lerp(0.0f, 0.8f, twilight));
+				env->set_fog_density(Math::lerp(0.015f, 0.008f, day_factor));
+				env->set_fog_sky_affect(0.85f);
+			} else {
+				env->set_fog_enabled(false);
+			}
+		}
+	}
+}
+
 void VoxelWorld::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_READY: {
@@ -137,6 +341,7 @@ void VoxelWorld::_notification(int p_what) {
 				print_line("[VoxelWorld] NOTIFICATION_READY received, initializing...");
 			}
 			set_process(true);
+			_resolve_environment_nodes();
 			_initialize_world();
 		} break;
 
@@ -144,6 +349,9 @@ void VoxelWorld::_notification(int p_what) {
 			if (!initialized) {
 				return;
 			}
+
+			float delta = get_process_delta_time();
+			_update_day_night_cycle(delta);
 
 			_integrate_finished_chunks();
 

@@ -7,7 +7,10 @@
 
 #include "core/os/mutex.h"
 #include "core/templates/hash_map.h"
+#include "scene/3d/light_3d.h"
 #include "scene/3d/node_3d.h"
+#include "scene/3d/world_environment.h"
+#include "scene/resources/environment.h"
 #include "scene/resources/material.h"
 
 VARIANT_ENUM_CAST(VoxelBlockType);
@@ -28,6 +31,23 @@ private:
 	uint32_t alpha_block_flags = 0; // Bitfield of AlphaBlockFlags.
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 	bool verbose_logging = true;
+
+	// --- Day/Night Cycle ---
+	float time_of_day = 12.0f; // 0.0–24.0 hours.
+	float day_length_seconds = 600.0f; // Real seconds per full day cycle.
+	bool auto_advance_time = false;
+
+	// --- Fog ---
+	bool fog_enabled = true;
+	float fog_distance_ratio = 0.85f; // Fog end as fraction of draw distance.
+
+	// --- Environment node references (resolved from NodePath) ---
+	NodePath sun_path;
+	NodePath moon_path;
+	NodePath environment_path;
+	DirectionalLight3D *sun_node = nullptr;
+	DirectionalLight3D *moon_node = nullptr;
+	WorldEnvironment *env_node = nullptr;
 
 	Ref<VoxelBlockRegistry> block_registry;
 	Ref<VoxelBiomeRegistry> biome_registry;
@@ -90,6 +110,10 @@ private:
 	Vector2i _world_to_chunk(const Vector3 &p_world_pos) const;
 	Vector3i _world_to_local_block(const Vector3 &p_world_pos) const;
 
+	// Day/night cycle helpers.
+	void _resolve_environment_nodes();
+	void _update_day_night_cycle(float p_delta);
+
 protected:
 	void _notification(int p_what);
 	static void _bind_methods();
@@ -121,6 +145,31 @@ public:
 
 	void set_verbose_logging(bool p_enabled) { verbose_logging = p_enabled; }
 	bool get_verbose_logging() const { return verbose_logging; }
+
+	// --- Day/Night Cycle ---
+	void set_time_of_day(float p_time);
+	float get_time_of_day() const { return time_of_day; }
+
+	void set_day_length_seconds(float p_seconds);
+	float get_day_length_seconds() const { return day_length_seconds; }
+
+	void set_auto_advance_time(bool p_enabled) { auto_advance_time = p_enabled; }
+	bool get_auto_advance_time() const { return auto_advance_time; }
+
+	void set_fog_enabled(bool p_enabled) { fog_enabled = p_enabled; }
+	bool get_fog_enabled() const { return fog_enabled; }
+
+	void set_fog_distance_ratio(float p_ratio);
+	float get_fog_distance_ratio() const { return fog_distance_ratio; }
+
+	void set_sun_path(const NodePath &p_path);
+	NodePath get_sun_path() const { return sun_path; }
+
+	void set_moon_path(const NodePath &p_path);
+	NodePath get_moon_path() const { return moon_path; }
+
+	void set_environment_path(const NodePath &p_path);
+	NodePath get_environment_path() const { return environment_path; }
 
 	// --- Block interaction API (exposed to GDScript) ---
 

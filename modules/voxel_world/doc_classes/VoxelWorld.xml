@@ -74,6 +74,30 @@
 		<member name="block_registry" type="VoxelBlockRegistry" setter="set_block_registry" getter="get_block_registry">
 			The block registry resource that defines block types, colors, and textures. If not set, a default registry with 10 built-in block types is created automatically.
 		</member>
+		<member name="day_night_time_of_day" type="float" setter="set_time_of_day" getter="get_time_of_day" default="12.0">
+			Current time of day in hours (0.0–24.0). 0/24 = midnight, 6 = sunrise, 12 = noon, 18 = sunset. Controls sun/moon rotation, ambient light color, and fog color when environment nodes are assigned via [member env_sun_path], [member env_moon_path], and [member env_environment_path].
+		</member>
+		<member name="day_night_day_length" type="float" setter="set_day_length_seconds" getter="get_day_length_seconds" default="600.0">
+			Duration of one full day/night cycle in real seconds. Only used when [member day_night_auto_advance] is [code]true[/code]. Valid range: 10 to 3600 seconds.
+		</member>
+		<member name="day_night_auto_advance" type="bool" setter="set_auto_advance_time" getter="get_auto_advance_time" default="false">
+			If [code]true[/code], [member day_night_time_of_day] advances automatically each frame based on [member day_night_day_length]. Emits [signal time_of_day_changed] each frame.
+		</member>
+		<member name="fog_enabled" type="bool" setter="set_fog_enabled" getter="get_fog_enabled" default="true">
+			If [code]true[/code], distance fog is applied to the environment. Fog fades distant terrain to the sky color, matching the current time of day.
+		</member>
+		<member name="fog_distance_ratio" type="float" setter="set_fog_distance_ratio" getter="get_fog_distance_ratio" default="0.85">
+			Fog end distance as a fraction of the total draw distance ([member chunk_load_radius] × chunk size × [member block_size]). Lower values make fog start earlier. Valid range: 0.3 to 1.0.
+		</member>
+		<member name="env_sun_path" type="NodePath" setter="set_sun_path" getter="get_sun_path" default="NodePath(&quot;&quot;)">
+			Path to a [DirectionalLight3D] node used as the sun. VoxelWorld will rotate it, and adjust its color and energy based on [member day_night_time_of_day].
+		</member>
+		<member name="env_moon_path" type="NodePath" setter="set_moon_path" getter="get_moon_path" default="NodePath(&quot;&quot;)">
+			Path to a [DirectionalLight3D] node used as the moon. Optional. VoxelWorld will rotate it opposite to the sun and set a cool blue-white color at night.
+		</member>
+		<member name="env_environment_path" type="NodePath" setter="set_environment_path" getter="get_environment_path" default="NodePath(&quot;&quot;)">
+			Path to a [WorldEnvironment] node. VoxelWorld will update its [Environment] resource's ambient light, fog color/density, and fog distance based on the time of day.
+		</member>
 	</members>
 	<signals>
 		<signal name="block_placed">
@@ -88,6 +112,12 @@
 			<param index="1" name="old_block_id" type="int" />
 			<description>
 				Emitted when a block is broken (set to Air) via [method set_block_at].
+			</description>
+		</signal>
+		<signal name="time_of_day_changed">
+			<param index="0" name="time" type="float" />
+			<description>
+				Emitted every frame when [member day_night_auto_advance] is [code]true[/code], with the current [member day_night_time_of_day] value.
 			</description>
 		</signal>
 	</signals>

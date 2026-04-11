@@ -491,6 +491,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	float lake_bank_factors[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	int local_water_levels[CHUNK_SIZE_X][CHUNK_SIZE_Z];
 	int surface_y_cache[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+	int slope_cache[CHUNK_SIZE_X][CHUNK_SIZE_Z]; // Max height diff to axis-aligned in-chunk neighbors.
 
 	// Pre-compute 2D per-column data: biomes, heights, water features.
 	for (int x = 0; x < CHUNK_SIZE_X; x++) {
@@ -615,6 +616,32 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 		}
 	}
 
+	// --- Slope pre-computation ---
+	// For each column compute the steepest drop to any axis-aligned in-chunk
+	// neighbor. Out-of-chunk neighbors are skipped (treated as neutral) to
+	// avoid extra noise queries; this causes at most a 1-block artefact at
+	// chunk borders which is not visible in practice.
+	static const int _slope_dx[4] = { -1, 1, 0, 0 };
+	static const int _slope_dz[4] = { 0, 0, -1, 1 };
+	for (int x = 0; x < CHUNK_SIZE_X; x++) {
+		for (int z = 0; z < CHUNK_SIZE_Z; z++) {
+			int sh = surface_y_cache[x][z];
+			int max_diff = 0;
+			for (int d = 0; d < 4; d++) {
+				int nx = x + _slope_dx[d];
+				int nz = z + _slope_dz[d];
+				if (nx < 0 || nx >= CHUNK_SIZE_X || nz < 0 || nz >= CHUNK_SIZE_Z) {
+					continue;
+				}
+				int diff = Math::abs(surface_y_cache[nx][nz] - sh);
+				if (diff > max_diff) {
+					max_diff = diff;
+				}
+			}
+			slope_cache[x][z] = max_diff;
+		}
+	}
+
 	// --- Pass 2: Block type assignment (biome-aware) ---
 	for (int x = 0; x < CHUNK_SIZE_X; x++) {
 		for (int z = 0; z < CHUNK_SIZE_Z; z++) {
@@ -625,6 +652,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			float lf = lake_factors[x][z];
 			float lbf = lake_bank_factors[x][z];
 			const BiomeParams &bp = blended[x][z];
+			bool flat_shore = (slope_cache[x][z] <= BEACH_MAX_SLOPE);
 
 			bool is_water_body = (rf > 0.0f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
 					(rbf > 0.3f && original_base_heights[x][z] > (float)(sea_level + RIVER_MIN_HEIGHT)) ||
@@ -645,8 +673,8 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 					// Surface block — biome-dependent.
 					if (is_water_body || sh <= wl) {
 						blocks_w[idx] = VOXEL_BLOCK_SAND;
-					} else if (sh <= wl + 2) {
-						blocks_w[idx] = VOXEL_BLOCK_SAND; // Shore / beach.
+					} else if (sh <= wl + BEACH_HEIGHT && flat_shore) {
+						blocks_w[idx] = VOXEL_BLOCK_SAND; // Flat shore / beach.
 					} else if (sh > bp.snow_line) {
 						blocks_w[idx] = VOXEL_BLOCK_SNOW;
 					} else {
@@ -654,7 +682,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 					}
 				} else if (depth <= 4) {
 					// Subsurface — biome-dependent.
-					if (is_water_body || sh <= wl + 2) {
+					if (is_water_body || (sh <= wl + BEACH_HEIGHT && flat_shore)) {
 						blocks_w[idx] = VOXEL_BLOCK_SAND;
 					} else {
 						blocks_w[idx] = bp.subsurface_block;

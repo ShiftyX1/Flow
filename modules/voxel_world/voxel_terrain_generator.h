@@ -63,6 +63,12 @@ public:
 	static constexpr float OCEAN_THRESHOLD = -0.2f;
 	static constexpr float OCEAN_DEPTH_SCALE = 25.0f;
 
+	// Beach / shore constants.
+	// Sand only appears on shores where the slope is gentle (flat beach).
+	// Steep cliffs dropping into water keep the biome block (stone, grass, etc.).
+	static constexpr int BEACH_HEIGHT = 3;    // Max blocks above sea_level for the beach zone.
+	static constexpr int BEACH_MAX_SLOPE = 3; // Max height diff to a neighbor to qualify as flat.
+
 	// Minimum dominant-biome weight to stay in pure-biome mode (no block dithering).
 	// Below this threshold (genuine transition zone) probabilistic mixing is applied.
 	static constexpr float BIOME_DITHER_THRESHOLD = 0.30f;
@@ -96,7 +102,7 @@ private:
 	Ref<FastNoiseLite> humidity_noise;
 
 	int seed = 0;
-	int sea_level = 64;
+	int sea_level = 52; // Keep in sync with VoxelWorld::sea_level default.
 
 	Ref<VoxelBiomeRegistry> biome_registry;
 

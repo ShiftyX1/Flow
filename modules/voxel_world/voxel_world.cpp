@@ -88,6 +88,9 @@ void VoxelWorld::set_block_size(float p_size) {
 
 void VoxelWorld::set_sea_level(int p_level) {
 	sea_level = CLAMP(p_level, 0, VoxelTerrainGenerator::CHUNK_SIZE_Y - 1);
+	if (generator) {
+		generator->set_sea_level(sea_level);
+	}
 }
 
 void VoxelWorld::set_texture_filter(BaseMaterial3D::TextureFilter p_filter) {

@@ -534,29 +534,35 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			int wl = _get_local_water_level(wx, wz);
 			local_water_levels[x][z] = wl;
 
-			// Carve rivers.
 			float river_bed = (float)(sea_level - RIVER_BED_OFFSET);
+			float river_bank_target = (float)(sea_level + 1);
+
+			// River bank blending FIRST. Inside the river zone (rf > 0) treat the bank
+			// factor as fully applied (1.0) so the bank→river transition is spatially
+			// continuous — prevents the "wall" that forms when the bank effect vanishes
+			// exactly where the river factor starts from zero.
+			float effective_rbf = (rf > 0.0f) ? 1.0f : rbf;
+			if (effective_rbf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
+				bh = Math::lerp(bh, river_bank_target, effective_rbf * 0.85f);
+			}
+
+			// Carve river channel on top of the bank-modified height.
 			if (rf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
 				bh = Math::lerp(bh, river_bed, rf);
 			}
 
-			// River bank blending.
-			if (rbf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
-				float bank_target = (float)(sea_level + 1);
-				bh = Math::lerp(bh, bank_target, rbf * 0.85f);
+			// Lake bank blending FIRST (same continuity fix as rivers).
+			float effective_lbf = (lf > 0.0f) ? 1.0f : lbf;
+			if (effective_lbf > 0.0f && bh > (float)(wl + 1)) {
+				float lake_bank_target = (float)(wl + 1);
+				bh = Math::lerp(bh, lake_bank_target, effective_lbf * 0.8f);
 			}
 
 			// Carve lakes: push terrain below sea_level at the basin centre
 			// so water fills naturally at sea_level regardless of terrain altitude.
 			if (lf > 0.0f) {
-				float excess = (bh - (float)sea_level + 3.0f > 0.0f) ? (bh - (float)sea_level + 3.0f) : 0.0f;
+				float excess = MAX(bh - (float)sea_level + 3.0f, 0.0f);
 				bh -= lf * (LAKE_MAX_DEPTH + excess);
-			}
-
-			// Lake bank blending — slope terrain down to lake shore.
-			if (lbf > 0.0f && bh > (float)(wl + 1)) {
-				float bank_target = (float)(wl + 1);
-				bh = Math::lerp(bh, bank_target, lbf * 0.8f);
 			}
 
 			base_heights[x][z] = bh;

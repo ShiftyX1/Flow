@@ -23,7 +23,7 @@ private:
 	int seed = -1;
 	int chunk_load_radius = 8;
 	float block_size = 1.0f;
-	int sea_level = 20;
+	int sea_level = 52;
 	int chunks_per_frame = 4; // Max chunks to integrate into scene tree per frame.
 	uint32_t alpha_block_flags = 0; // Bitfield of AlphaBlockFlags.
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;

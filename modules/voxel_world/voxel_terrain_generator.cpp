@@ -18,10 +18,10 @@ static _FORCE_INLINE_ uint32_t _hash_u32(uint32_t x) {
 
 //                                                    height_base  height_scale  detail_scale  density_3d  surface             subsurface          tree_density  snow_line
 const BiomeParams VoxelTerrainGenerator::BIOME_TABLE[BIOME_MAX] = {
-	/* DESERT    */ { 0.0f,  8.0f,  1.0f,  3.0f, VOXEL_BLOCK_SAND,  VOXEL_BLOCK_SAND,  0,   999 },
-	/* MEADOW    */ { 0.0f, 15.0f,  3.0f,  5.0f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  120, 165 },
-	/* FOREST    */ { 2.0f, 18.0f,  4.0f,  5.0f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  25,  165 },
-	/* MOUNTAINS */ { 30.0f, 85.0f, 25.0f, 14.0f, VOXEL_BLOCK_STONE, VOXEL_BLOCK_STONE, 300, 115 },
+	/* DESERT    */ { 0.0f,  8.0f,  1.0f,  0.3f, VOXEL_BLOCK_SAND,  VOXEL_BLOCK_SAND,  0,   999 },
+	/* MEADOW    */ { 0.0f, 15.0f,  3.0f,  0.5f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  120, 165 },
+	/* FOREST    */ { 2.0f, 18.0f,  3.0f,  0.8f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  25,  165 },
+	/* MOUNTAINS */ { 20.0f, 45.0f, 12.0f, 2.5f, VOXEL_BLOCK_STONE, VOXEL_BLOCK_STONE, 300, 115 },
 };
 
 // Biome centers in (temperature, humidity) space. Noise outputs are in [-1, 1].
@@ -54,7 +54,7 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	// --- 3D density: main terrain shape — overhangs, natural caves (OpenSimplex2). ---
 	density_noise.instantiate();
 	density_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
-	density_noise->set_frequency(0.015f);
+	density_noise->set_frequency(0.008f);
 	density_noise->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
 	density_noise->set_fractal_octaves(3);
 	density_noise->set_fractal_lacunarity(2.0f);
@@ -63,7 +63,7 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	// --- 3D density detail: smaller-scale 3D features (OpenSimplex2, higher freq). ---
 	density_detail_noise.instantiate();
 	density_detail_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
-	density_detail_noise->set_frequency(0.04f);
+	density_detail_noise->set_frequency(0.02f);
 	density_detail_noise->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
 	density_detail_noise->set_fractal_octaves(2);
 	density_detail_noise->set_fractal_lacunarity(2.0f);
@@ -312,7 +312,7 @@ int VoxelTerrainGenerator::_find_surface_y(int p_world_x, int p_world_z, const B
 	for (int y = CHUNK_SIZE_Y - 1; y >= 1; y--) {
 		float depth_bias = (base_h - (float)y) * SQUISH_FACTOR;
 		float n3d = density_noise->get_noise_3d((real_t)p_world_x, (real_t)y, (real_t)p_world_z) * p_params.density_3d_weight;
-		float n3d_detail = density_detail_noise->get_noise_3d((real_t)p_world_x, (real_t)y, (real_t)p_world_z) * 1.5f;
+		float n3d_detail = density_detail_noise->get_noise_3d((real_t)p_world_x, (real_t)y, (real_t)p_world_z) * 0.4f;
 		if (depth_bias + n3d + n3d_detail > 0.0f) {
 			return y;
 		}
@@ -584,7 +584,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				// Compute density: depth bias + biome-scaled 3D noise.
 				float depth_bias = (bh - (float)y) * SQUISH_FACTOR;
 				float n3d = density_noise->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz) * d3d_weight;
-				float n3d_detail = density_detail_noise->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz) * 1.5f;
+				float n3d_detail = density_detail_noise->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz) * 0.4f;
 				float density = depth_bias + n3d + n3d_detail;
 
 				if (density > 0.0f) {

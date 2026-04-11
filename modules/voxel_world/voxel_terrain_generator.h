@@ -45,7 +45,7 @@ public:
 
 	// 3D density terrain constants (defaults, overridden per-biome).
 	static constexpr float BASE_HEIGHT = 64.0f;
-	static constexpr float SQUISH_FACTOR = 0.12f;
+	static constexpr float SQUISH_FACTOR = 0.25f;
 
 	static constexpr float CAVE_THRESHOLD = 0.16f;        // abs(noise) < threshold → carve tunnel
 	static constexpr float CAVE_SURFACE_THRESHOLD = 0.05f; // tighter near surface → almost no caves
@@ -55,13 +55,13 @@ public:
 	static constexpr float RIVER_WIDTH = 0.07f;
 	static constexpr float RIVER_BANK_WIDTH = 0.06f;
 	static constexpr int RIVER_BED_OFFSET = 2;
-	static constexpr int RIVER_MIN_HEIGHT = 5;
+	static constexpr int RIVER_MIN_HEIGHT = 3;
 	static constexpr float LAKE_THRESHOLD = 0.35f;
 	static constexpr float LAKE_MAX_DEPTH = 6.0f;
 	static constexpr float LAKE_BANK_WIDTH = 0.10f;
 	static constexpr int LAKE_LEVEL_GRID = 64;
-	static constexpr float OCEAN_THRESHOLD = -0.3f;
-	static constexpr float OCEAN_DEPTH_SCALE = 15.0f;
+	static constexpr float OCEAN_THRESHOLD = -0.2f;
+	static constexpr float OCEAN_DEPTH_SCALE = 25.0f;
 
 	// Biome lookup tables.
 	static const BiomeParams BIOME_TABLE[BIOME_MAX];
@@ -92,7 +92,7 @@ private:
 	Ref<FastNoiseLite> humidity_noise;
 
 	int seed = 0;
-	int sea_level = 40;
+	int sea_level = 52;
 
 	Ref<VoxelBiomeRegistry> biome_registry;
 

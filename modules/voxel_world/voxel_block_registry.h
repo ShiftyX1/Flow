@@ -17,6 +17,9 @@ public:
 		Ref<Texture2D> texture_side;
 		Ref<Texture2D> texture_bottom;
 		Ref<ShaderMaterial> shader_material;
+		// Normalized fractions of block_size (0.0–1.0). 1.0 = full block height.
+		float mesh_height = 1.0f;       // Visual top-surface height.
+		float collision_height = 1.0f;  // Physics AABB height.
 	};
 
 private:
@@ -52,6 +55,12 @@ public:
 	void set_block_shader_material(int p_id, const Ref<ShaderMaterial> &p_material);
 	Ref<ShaderMaterial> get_block_shader_material(int p_id) const;
 	bool block_has_shader(int p_id) const;
+
+	void set_block_mesh_height(int p_id, float p_height);
+	float get_block_mesh_height(int p_id) const;
+
+	void set_block_collision_height(int p_id, float p_height);
+	float get_block_collision_height(int p_id) const;
 
 	const HashMap<int, BlockEntry> &get_blocks_map() const { return blocks; }
 

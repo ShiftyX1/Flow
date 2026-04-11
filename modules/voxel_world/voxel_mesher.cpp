@@ -124,6 +124,11 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					tex_side = p_registry->get_block_texture_for_face((int)type, Vector3(1, 0, 0));
 				}
 
+				// Normalized block height (0.0–1.0), multiplied by block_size to get world units.
+				// Defaults to 1.0 when no registry entry is present.
+				float mesh_h = use_registry ? p_registry->get_block_mesh_height((int)type) : 1.0f;
+				const float top_y = bs * mesh_h;
+
 				if (block_shader.is_valid()) {
 					// Route all faces to a shader surface keyed by block_type.
 					if (!shader_surfaces.has((int)type)) {
@@ -141,8 +146,8 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x + 1, y, z)) {
 						add_face(*surf,
 								origin + Vector3(bs, 0, 0),
-								origin + Vector3(bs, bs, 0),
-								origin + Vector3(bs, bs, bs),
+								origin + Vector3(bs, top_y, 0),
+								origin + Vector3(bs, top_y, bs),
 								origin + Vector3(bs, 0, bs),
 								Vector3(1, 0, 0), face_col, has_tex, true);
 					}
@@ -150,18 +155,18 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x - 1, y, z)) {
 						add_face(*surf,
 								origin + Vector3(0, 0, bs),
-								origin + Vector3(0, bs, bs),
-								origin + Vector3(0, bs, 0),
+								origin + Vector3(0, top_y, bs),
+								origin + Vector3(0, top_y, 0),
 								origin + Vector3(0, 0, 0),
 								Vector3(-1, 0, 0), face_col, has_tex, true);
 					}
 					// +Y face (top)
 					if (should_show_face(x, y + 1, z)) {
 						add_face(*surf,
-								origin + Vector3(0, bs, 0),
-								origin + Vector3(0, bs, bs),
-								origin + Vector3(bs, bs, bs),
-								origin + Vector3(bs, bs, 0),
+								origin + Vector3(0, top_y, 0),
+								origin + Vector3(0, top_y, bs),
+								origin + Vector3(bs, top_y, bs),
+								origin + Vector3(bs, top_y, 0),
 								Vector3(0, 1, 0), face_col, has_tex);
 					}
 					// -Y face (bottom)
@@ -177,8 +182,8 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x, y, z + 1)) {
 						add_face(*surf,
 								origin + Vector3(bs, 0, bs),
-								origin + Vector3(bs, bs, bs),
-								origin + Vector3(0, bs, bs),
+								origin + Vector3(bs, top_y, bs),
+								origin + Vector3(0, top_y, bs),
 								origin + Vector3(0, 0, bs),
 								Vector3(0, 0, 1), face_col, has_tex, true);
 					}
@@ -186,8 +191,8 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x, y, z - 1)) {
 						add_face(*surf,
 								origin + Vector3(0, 0, 0),
-								origin + Vector3(0, bs, 0),
-								origin + Vector3(bs, bs, 0),
+								origin + Vector3(0, top_y, 0),
+								origin + Vector3(bs, top_y, 0),
 								origin + Vector3(bs, 0, 0),
 								Vector3(0, 0, -1), face_col, has_tex, true);
 					}
@@ -216,8 +221,8 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x + 1, y, z)) {
 						add_face(*get_face_surface(tex_side), 
 								origin + Vector3(bs, 0, 0),
-								origin + Vector3(bs, bs, 0),
-								origin + Vector3(bs, bs, bs),
+								origin + Vector3(bs, top_y, 0),
+								origin + Vector3(bs, top_y, bs),
 								origin + Vector3(bs, 0, bs),
 								Vector3(1, 0, 0), get_face_color(tex_side), tex_side.is_valid(), true);
 					}
@@ -225,18 +230,18 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x - 1, y, z)) {
 						add_face(*get_face_surface(tex_side),
 								origin + Vector3(0, 0, bs),
-								origin + Vector3(0, bs, bs),
-								origin + Vector3(0, bs, 0),
+								origin + Vector3(0, top_y, bs),
+								origin + Vector3(0, top_y, 0),
 								origin + Vector3(0, 0, 0),
 								Vector3(-1, 0, 0), get_face_color(tex_side), tex_side.is_valid(), true);
 					}
 					// +Y face (top)
 					if (should_show_face(x, y + 1, z)) {
 						add_face(*get_face_surface(tex_top),
-								origin + Vector3(0, bs, 0),
-								origin + Vector3(0, bs, bs),
-								origin + Vector3(bs, bs, bs),
-								origin + Vector3(bs, bs, 0),
+								origin + Vector3(0, top_y, 0),
+								origin + Vector3(0, top_y, bs),
+								origin + Vector3(bs, top_y, bs),
+								origin + Vector3(bs, top_y, 0),
 								Vector3(0, 1, 0), get_face_color(tex_top), tex_top.is_valid());
 					}
 					// -Y face (bottom)
@@ -252,8 +257,8 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x, y, z + 1)) {
 						add_face(*get_face_surface(tex_side),
 								origin + Vector3(bs, 0, bs),
-								origin + Vector3(bs, bs, bs),
-								origin + Vector3(0, bs, bs),
+								origin + Vector3(bs, top_y, bs),
+								origin + Vector3(0, top_y, bs),
 								origin + Vector3(0, 0, bs),
 								Vector3(0, 0, 1), get_face_color(tex_side), tex_side.is_valid(), true);
 					}
@@ -261,8 +266,8 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					if (should_show_face(x, y, z - 1)) {
 						add_face(*get_face_surface(tex_side),
 								origin + Vector3(0, 0, 0),
-								origin + Vector3(0, bs, 0),
-								origin + Vector3(bs, bs, 0),
+								origin + Vector3(0, top_y, 0),
+								origin + Vector3(bs, top_y, 0),
 								origin + Vector3(bs, 0, 0),
 								Vector3(0, 0, -1), get_face_color(tex_side), tex_side.is_valid(), true);
 					}

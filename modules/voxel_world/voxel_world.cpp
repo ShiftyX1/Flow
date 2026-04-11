@@ -834,7 +834,11 @@ Dictionary VoxelWorld::move_body(const AABB &p_body, const Vector3 &p_velocity, 
 						continue;
 					}
 
-					AABB block_aabb(Vector3(bx * bs, by * bs, bz * bs), Vector3(bs, bs, bs));
+					float col_h = 1.0f;
+					if (block_registry.is_valid() && block_registry->has_block(bid)) {
+						col_h = block_registry->get_block_collision_height(bid);
+					}
+					AABB block_aabb(Vector3(bx * bs, by * bs, bz * bs), Vector3(bs, bs * col_h, bs));
 					if (!swept.intersects(block_aabb)) {
 						continue;
 					}

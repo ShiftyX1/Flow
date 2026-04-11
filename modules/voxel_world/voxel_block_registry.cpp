@@ -26,6 +26,10 @@ bool VoxelBlockRegistry::_set(const StringName &p_name, const Variant &p_value) 
 			set_block_texture_bottom(idx, p_value);
 		} else if (what == "shader_material") {
 			set_block_shader_material(idx, p_value);
+		} else if (what == "mesh_height") {
+			set_block_mesh_height(idx, p_value);
+		} else if (what == "collision_height") {
+			set_block_collision_height(idx, p_value);
 		} else {
 			return false;
 		}
@@ -53,6 +57,10 @@ bool VoxelBlockRegistry::_get(const StringName &p_name, Variant &r_ret) const {
 		r_ret = get_block_texture_bottom(idx);
 	} else if (what == "shader_material") {
 		r_ret = get_block_shader_material(idx);
+	} else if (what == "mesh_height") {
+		r_ret = get_block_mesh_height(idx);
+	} else if (what == "collision_height") {
+		r_ret = get_block_collision_height(idx);
 	} else {
 		return false;
 	}
@@ -74,6 +82,8 @@ void VoxelBlockRegistry::_get_property_list(List<PropertyInfo> *p_list) const {
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "texture_side", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"));
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "texture_bottom", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"));
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "shader_material", PROPERTY_HINT_RESOURCE_TYPE, "ShaderMaterial"));
+		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "mesh_height", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"));
+		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "collision_height", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"));
 	}
 }
 
@@ -100,6 +110,12 @@ void VoxelBlockRegistry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_block_shader_material", "id", "material"), &VoxelBlockRegistry::set_block_shader_material);
 	ClassDB::bind_method(D_METHOD("get_block_shader_material", "id"), &VoxelBlockRegistry::get_block_shader_material);
 	ClassDB::bind_method(D_METHOD("block_has_shader", "id"), &VoxelBlockRegistry::block_has_shader);
+
+	ClassDB::bind_method(D_METHOD("set_block_mesh_height", "id", "height"), &VoxelBlockRegistry::set_block_mesh_height);
+	ClassDB::bind_method(D_METHOD("get_block_mesh_height", "id"), &VoxelBlockRegistry::get_block_mesh_height);
+
+	ClassDB::bind_method(D_METHOD("set_block_collision_height", "id", "height"), &VoxelBlockRegistry::set_block_collision_height);
+	ClassDB::bind_method(D_METHOD("get_block_collision_height", "id"), &VoxelBlockRegistry::get_block_collision_height);
 
 	ClassDB::bind_method(D_METHOD("setup_defaults"), &VoxelBlockRegistry::setup_defaults);
 }
@@ -216,9 +232,34 @@ bool VoxelBlockRegistry::block_has_shader(int p_id) const {
 	return blocks[p_id].shader_material.is_valid();
 }
 
+void VoxelBlockRegistry::set_block_mesh_height(int p_id, float p_height) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].mesh_height = CLAMP(p_height, 0.0f, 1.0f);
+	emit_changed();
+}
+
+float VoxelBlockRegistry::get_block_mesh_height(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), 1.0f);
+	return blocks[p_id].mesh_height;
+}
+
+void VoxelBlockRegistry::set_block_collision_height(int p_id, float p_height) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].collision_height = CLAMP(p_height, 0.0f, 1.0f);
+	emit_changed();
+}
+
+float VoxelBlockRegistry::get_block_collision_height(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), 1.0f);
+	return blocks[p_id].collision_height;
+}
+
 void VoxelBlockRegistry::setup_defaults() {
 	// Create entries for all engine-defined block types (texture slots empty).
 	for (int i = 0; i < VOXEL_BLOCK_TYPE_MAX; i++) {
 		create_block(i);
 	}
+	// Water sits at 87.5% height so shader wave displacement stays below adjacent solid blocks.
+	blocks[VOXEL_BLOCK_WATER].mesh_height = 0.875f;
+	blocks[VOXEL_BLOCK_WATER].collision_height = 0.875f;
 }

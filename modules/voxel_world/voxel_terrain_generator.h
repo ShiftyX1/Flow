@@ -1,5 +1,6 @@
 #pragma once
 
+#include "voxel_biome_registry.h"
 #include "voxel_block_data.h"
 
 #include "core/math/vector2.h"
@@ -32,6 +33,9 @@ public:
 	static const int CHUNK_SIZE_X = 16;
 	static const int CHUNK_SIZE_Y = 64;
 	static const int CHUNK_SIZE_Z = 16;
+
+	// Maximum number of biomes supported when using a VoxelBiomeRegistry.
+	static const int MAX_BIOMES = 64;
 
 	// Tree generation constants.
 	static const int TREE_CHECK_BORDER = 4;
@@ -87,9 +91,16 @@ private:
 	int seed = 0;
 	int sea_level = 20;
 
-	// Biome helpers.
-	void _get_biome_weights(int p_world_x, int p_world_z, float r_weights[BIOME_MAX]) const;
-	BiomeParams _get_blended_params(const float p_weights[BIOME_MAX]) const;
+	Ref<VoxelBiomeRegistry> biome_registry;
+
+	// Biome data access (falls back to static tables when no registry is set).
+	int _get_biome_count() const;
+	BiomeParams _get_biome_params_at(int p_index) const;
+	Vector2 _get_biome_center_at(int p_index) const;
+
+	// Biome weight and blending helpers.
+	void _get_biome_weights(int p_world_x, int p_world_z, float *r_weights, int p_biome_count) const;
+	BiomeParams _get_blended_params(const float *p_weights, int p_biome_count) const;
 
 	float _get_base_height(int p_world_x, int p_world_z, const BiomeParams &p_params) const;
 	int _find_surface_y(int p_world_x, int p_world_z, const BiomeParams &p_params) const;
@@ -114,6 +125,12 @@ public:
 
 	void set_sea_level(int p_sea_level) { sea_level = p_sea_level; }
 	int get_sea_level() const { return sea_level; }
+
+	void set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry) { biome_registry = p_registry; }
+
+	// Returns the index of the dominant biome at the given world block coordinates.
+	int get_biome_index_at(int p_world_x, int p_world_z) const;
+
 	Vector<uint8_t> generate_chunk_data(int p_chunk_x, int p_chunk_z) const;
 	static _FORCE_INLINE_ int block_index(int p_x, int p_y, int p_z) {
 		return p_x + p_z * CHUNK_SIZE_X + p_y * CHUNK_SIZE_X * CHUNK_SIZE_Z;

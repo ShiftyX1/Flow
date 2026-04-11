@@ -30,9 +30,14 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_block_registry", "registry"), &VoxelWorld::set_block_registry);
 	ClassDB::bind_method(D_METHOD("get_block_registry"), &VoxelWorld::get_block_registry);
 
+	ClassDB::bind_method(D_METHOD("set_biome_registry", "registry"), &VoxelWorld::set_biome_registry);
+	ClassDB::bind_method(D_METHOD("get_biome_registry"), &VoxelWorld::get_biome_registry);
+
 	ClassDB::bind_method(D_METHOD("get_block_at", "world_pos"), &VoxelWorld::get_block_at);
 	ClassDB::bind_method(D_METHOD("set_block_at", "world_pos", "block_id"), &VoxelWorld::set_block_at);
 	ClassDB::bind_method(D_METHOD("get_block_name_at", "world_pos"), &VoxelWorld::get_block_name_at);
+	ClassDB::bind_method(D_METHOD("get_biome_at", "world_pos"), &VoxelWorld::get_biome_at);
+	ClassDB::bind_method(D_METHOD("get_biome_name_at", "world_pos"), &VoxelWorld::get_biome_name_at);
 	ClassDB::bind_method(D_METHOD("world_to_block_pos", "world_pos"), &VoxelWorld::world_to_block_pos);
 	ClassDB::bind_method(D_METHOD("block_to_world_pos", "block_pos"), &VoxelWorld::block_to_world_pos);
 	ClassDB::bind_method(D_METHOD("raycast_block", "origin", "direction", "max_distance"), &VoxelWorld::raycast_block, DEFVAL(10.0f));
@@ -45,6 +50,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Air,Grass,Dirt,Stone,Sand,Water,Snow,Wood,Leaves,Bedrock"), "set_alpha_block_flags", "get_alpha_block_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
 
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
 	ADD_SIGNAL(MethodInfo("block_broken", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "old_block_id")));
@@ -100,6 +106,17 @@ Ref<VoxelBlockRegistry> VoxelWorld::get_block_registry() const {
 	return block_registry;
 }
 
+void VoxelWorld::set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry) {
+	biome_registry = p_registry;
+	if (generator) {
+		generator->set_biome_registry(biome_registry);
+	}
+}
+
+Ref<VoxelBiomeRegistry> VoxelWorld::get_biome_registry() const {
+	return biome_registry;
+}
+
 void VoxelWorld::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_READY: {
@@ -151,6 +168,7 @@ void VoxelWorld::_initialize_world() {
 	}
 	generator->set_seed(effective_seed);
 	generator->set_sea_level(sea_level);
+	generator->set_biome_registry(biome_registry);
 
 	print_line("[VoxelWorld] Seed: " + itos(effective_seed) + ", sea_level: " + itos(sea_level) + ", block_size: " + rtos(block_size) + ", load_radius: " + itos(chunk_load_radius));
 
@@ -484,6 +502,34 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 String VoxelWorld::get_block_name_at(const Vector3 &p_world_pos) const {
 	int block_id = get_block_at(p_world_pos);
 	return VoxelBlockData::get_block_name((VoxelBlockType)block_id);
+}
+
+int VoxelWorld::get_biome_at(const Vector3 &p_world_pos) const {
+	if (!generator) {
+		return -1;
+	}
+	int bx = (int)Math::floor(p_world_pos.x / block_size);
+	int bz = (int)Math::floor(p_world_pos.z / block_size);
+	return generator->get_biome_index_at(bx, bz);
+}
+
+String VoxelWorld::get_biome_name_at(const Vector3 &p_world_pos) const {
+	int index = get_biome_at(p_world_pos);
+	if (index < 0) {
+		return String("Unknown");
+	}
+	if (biome_registry.is_valid() && index < biome_registry->get_biome_count()) {
+		Ref<VoxelBiomeData> bd = biome_registry->get_biome(index);
+		if (bd.is_valid()) {
+			return bd->get_biome_name();
+		}
+	}
+	// Fallback names for the four built-in static biomes.
+	static const char *fallback_names[] = { "Desert", "Meadow", "Forest", "Mountains" };
+	if (index < 4) {
+		return String(fallback_names[index]);
+	}
+	return String("Biome_") + itos(index);
 }
 
 // --- Voxel raycast (DDA algorithm) ---

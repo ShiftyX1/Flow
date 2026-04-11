@@ -29,6 +29,7 @@ private:
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 
 	Ref<VoxelBlockRegistry> block_registry;
+	Ref<VoxelBiomeRegistry> biome_registry;
 
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
@@ -100,6 +101,9 @@ public:
 	void set_block_registry(const Ref<VoxelBlockRegistry> &p_registry);
 	Ref<VoxelBlockRegistry> get_block_registry() const;
 
+	void set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry);
+	Ref<VoxelBiomeRegistry> get_biome_registry() const;
+
 	// --- Block interaction API (exposed to GDScript) ---
 
 	// Get/set blocks by world position.
@@ -108,6 +112,11 @@ public:
 
 	// Get block name by world position.
 	String get_block_name_at(const Vector3 &p_world_pos) const;
+
+	// Get biome index (dominant biome) at a world position. Returns -1 before world is initialized.
+	int get_biome_at(const Vector3 &p_world_pos) const;
+	// Get biome name at a world position (uses registry name if set, fallback otherwise).
+	String get_biome_name_at(const Vector3 &p_world_pos) const;
 
 	// Convert world position to block grid position.
 	Vector3i world_to_block_pos(const Vector3 &p_world_pos) const;

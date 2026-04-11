@@ -151,11 +151,66 @@ void VoxelTerrainGenerator::set_seed(int p_seed) {
 	humidity_noise->set_seed(p_seed + 700);
 }
 
+int VoxelTerrainGenerator::get_biome_index_at(int p_world_x, int p_world_z) const {
+	const int count = _get_biome_count();
+	float weights[MAX_BIOMES] = {};
+	_get_biome_weights(p_world_x, p_world_z, weights, count);
+	int dominant = 0;
+	for (int i = 1; i < count; i++) {
+		if (weights[i] > weights[dominant]) {
+			dominant = i;
+		}
+	}
+	return dominant;
+}
+
+// ===========================================================================
+// Biome data access helpers
+// ===========================================================================
+
+int VoxelTerrainGenerator::_get_biome_count() const {
+	if (biome_registry.is_valid() && biome_registry->get_biome_count() > 0) {
+		int n = biome_registry->get_biome_count();
+		return n < MAX_BIOMES ? n : MAX_BIOMES;
+	}
+	return (int)BIOME_MAX;
+}
+
+BiomeParams VoxelTerrainGenerator::_get_biome_params_at(int p_index) const {
+	if (biome_registry.is_valid() && p_index < biome_registry->get_biome_count()) {
+		Ref<VoxelBiomeData> bd = biome_registry->get_biome(p_index);
+		if (bd.is_valid()) {
+			BiomeParams p;
+			p.height_base = bd->get_height_base();
+			p.height_scale = bd->get_height_scale();
+			p.detail_scale = bd->get_detail_scale();
+			p.density_3d_weight = bd->get_density_3d_weight();
+			p.surface_block = (uint8_t)bd->get_surface_block();
+			p.subsurface_block = (uint8_t)bd->get_subsurface_block();
+			p.tree_density = bd->get_tree_density();
+			p.snow_line = bd->get_snow_line();
+			return p;
+		}
+	}
+	// Fallback to static table.
+	return BIOME_TABLE[p_index < (int)BIOME_MAX ? p_index : 0];
+}
+
+Vector2 VoxelTerrainGenerator::_get_biome_center_at(int p_index) const {
+	if (biome_registry.is_valid() && p_index < biome_registry->get_biome_count()) {
+		Ref<VoxelBiomeData> bd = biome_registry->get_biome(p_index);
+		if (bd.is_valid()) {
+			return Vector2(bd->get_temperature_center(), bd->get_humidity_center());
+		}
+	}
+	return BIOME_CENTERS[p_index < (int)BIOME_MAX ? p_index : 0];
+}
+
 // ===========================================================================
 // Biome weight computation
 // ===========================================================================
 
-void VoxelTerrainGenerator::_get_biome_weights(int p_world_x, int p_world_z, float r_weights[BIOME_MAX]) const {
+void VoxelTerrainGenerator::_get_biome_weights(int p_world_x, int p_world_z, float *r_weights, int p_biome_count) const {
 	real_t wx = (real_t)p_world_x;
 	real_t wz = (real_t)p_world_z;
 
@@ -163,9 +218,10 @@ void VoxelTerrainGenerator::_get_biome_weights(int p_world_x, int p_world_z, flo
 	float humid = humidity_noise->get_noise_2d(wx, wz);
 
 	float total = 0.0f;
-	for (int i = 0; i < BIOME_MAX; i++) {
-		float dt = temp - BIOME_CENTERS[i].x;
-		float dh = humid - BIOME_CENTERS[i].y;
+	for (int i = 0; i < p_biome_count; i++) {
+		Vector2 center = _get_biome_center_at(i);
+		float dt = temp - center.x;
+		float dh = humid - center.y;
 		float dist_sq = dt * dt + dh * dh;
 		r_weights[i] = Math::exp(-4.0f * dist_sq);
 		total += r_weights[i];
@@ -173,17 +229,17 @@ void VoxelTerrainGenerator::_get_biome_weights(int p_world_x, int p_world_z, flo
 
 	if (total > 0.0f) {
 		float inv_total = 1.0f / total;
-		for (int i = 0; i < BIOME_MAX; i++) {
+		for (int i = 0; i < p_biome_count; i++) {
 			r_weights[i] *= inv_total;
 		}
 	} else {
-		for (int i = 0; i < BIOME_MAX; i++) {
-			r_weights[i] = 1.0f / (float)BIOME_MAX;
+		for (int i = 0; i < p_biome_count; i++) {
+			r_weights[i] = 1.0f / (float)p_biome_count;
 		}
 	}
 }
 
-BiomeParams VoxelTerrainGenerator::_get_blended_params(const float p_weights[BIOME_MAX]) const {
+BiomeParams VoxelTerrainGenerator::_get_blended_params(const float *p_weights, int p_biome_count) const {
 	BiomeParams result = {};
 	result.height_base = 0.0f;
 	result.height_scale = 0.0f;
@@ -193,20 +249,22 @@ BiomeParams VoxelTerrainGenerator::_get_blended_params(const float p_weights[BIO
 	float tree_density_f = 0.0f;
 
 	int dominant = 0;
-	for (int i = 0; i < BIOME_MAX; i++) {
-		result.height_base += BIOME_TABLE[i].height_base * p_weights[i];
-		result.height_scale += BIOME_TABLE[i].height_scale * p_weights[i];
-		result.detail_scale += BIOME_TABLE[i].detail_scale * p_weights[i];
-		result.density_3d_weight += BIOME_TABLE[i].density_3d_weight * p_weights[i];
-		snow_line_f += (float)BIOME_TABLE[i].snow_line * p_weights[i];
-		tree_density_f += (float)BIOME_TABLE[i].tree_density * p_weights[i];
+	for (int i = 0; i < p_biome_count; i++) {
+		BiomeParams bp = _get_biome_params_at(i);
+		result.height_base += bp.height_base * p_weights[i];
+		result.height_scale += bp.height_scale * p_weights[i];
+		result.detail_scale += bp.detail_scale * p_weights[i];
+		result.density_3d_weight += bp.density_3d_weight * p_weights[i];
+		snow_line_f += (float)bp.snow_line * p_weights[i];
+		tree_density_f += (float)bp.tree_density * p_weights[i];
 		if (p_weights[i] > p_weights[dominant]) {
 			dominant = i;
 		}
 	}
 
-	result.surface_block = BIOME_TABLE[dominant].surface_block;
-	result.subsurface_block = BIOME_TABLE[dominant].subsurface_block;
+	BiomeParams dominant_bp = _get_biome_params_at(dominant);
+	result.surface_block = dominant_bp.surface_block;
+	result.subsurface_block = dominant_bp.subsurface_block;
 	result.snow_line = (int)snow_line_f;
 	result.tree_density = (int)(tree_density_f + 0.5f);
 
@@ -408,6 +466,8 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	uint8_t *blocks_w = blocks.ptrw();
 	memset(blocks_w, VOXEL_BLOCK_AIR, total);
 
+	const int biome_count = _get_biome_count();
+
 	int world_x_start = p_chunk_x * CHUNK_SIZE_X;
 	int world_z_start = p_chunk_z * CHUNK_SIZE_Z;
 
@@ -429,9 +489,9 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			int wz = world_z_start + z;
 
 			// Biome weights and blended parameters.
-			float weights[BIOME_MAX];
-			_get_biome_weights(wx, wz, weights);
-			blended[x][z] = _get_blended_params(weights);
+			float weights[MAX_BIOMES] = {};
+			_get_biome_weights(wx, wz, weights, biome_count);
+			blended[x][z] = _get_blended_params(weights, biome_count);
 
 			// Dithered surface block: probabilistic selection by biome weights
 			// eliminates the hard colour snap at biome borders.
@@ -439,11 +499,12 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				uint32_t bseed = _hash_u32((uint32_t)seed ^ ((uint32_t)wx * 374761393U) ^ ((uint32_t)wz * 668265263U));
 				float r = (float)(bseed & 0xFFFFu) * (1.0f / 65536.0f);
 				float cumul = 0.0f;
-				for (int bi = 0; bi < BIOME_MAX; bi++) {
+				for (int bi = 0; bi < biome_count; bi++) {
 					cumul += weights[bi];
 					if (r < cumul) {
-						blended[x][z].surface_block = BIOME_TABLE[bi].surface_block;
-						blended[x][z].subsurface_block = BIOME_TABLE[bi].subsurface_block;
+						BiomeParams bp_bi = _get_biome_params_at(bi);
+						blended[x][z].surface_block = bp_bi.surface_block;
+						blended[x][z].subsurface_block = bp_bi.subsurface_block;
 						break;
 					}
 				}
@@ -621,9 +682,9 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 	for (int wx = world_x_start - border; wx < world_x_start + CHUNK_SIZE_X + border; wx++) {
 		for (int wz = world_z_start - border; wz < world_z_start + CHUNK_SIZE_Z + border; wz++) {
 			// Get biome tree density for this column.
-			float weights[BIOME_MAX];
-			_get_biome_weights(wx, wz, weights);
-			BiomeParams bp = _get_blended_params(weights);
+			float weights[MAX_BIOMES] = {};
+			_get_biome_weights(wx, wz, weights, biome_count);
+			BiomeParams bp = _get_blended_params(weights, biome_count);
 
 			if (!_should_place_tree(wx, wz, bp.tree_density)) {
 				continue;

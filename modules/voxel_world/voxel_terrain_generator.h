@@ -63,6 +63,10 @@ public:
 	static constexpr float OCEAN_THRESHOLD = -0.2f;
 	static constexpr float OCEAN_DEPTH_SCALE = 25.0f;
 
+	// Minimum dominant-biome weight to stay in pure-biome mode (no block dithering).
+	// Below this threshold (genuine transition zone) probabilistic mixing is applied.
+	static constexpr float BIOME_DITHER_THRESHOLD = 0.30f;
+
 	// Biome lookup tables.
 	static const BiomeParams BIOME_TABLE[BIOME_MAX];
 	static const Vector2 BIOME_CENTERS[BIOME_MAX]; // Ideal (temperature, humidity) per biome.
@@ -92,7 +96,7 @@ private:
 	Ref<FastNoiseLite> humidity_noise;
 
 	int seed = 0;
-	int sea_level = 52;
+	int sea_level = 64;
 
 	Ref<VoxelBiomeRegistry> biome_registry;
 

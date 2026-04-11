@@ -16,12 +16,12 @@ static _FORCE_INLINE_ uint32_t _hash_u32(uint32_t x) {
 // Biome parameter tables
 // ===========================================================================
 
-//                                                    height_base  height_scale  detail_scale  density_3d  surface             subsurface          tree_density  snow_line
+//  height_base  height_scale  detail_scale  density_3d  surface             subsurface          tree_density  snow_line
 const BiomeParams VoxelTerrainGenerator::BIOME_TABLE[BIOME_MAX] = {
-	/* DESERT    */ { 0.0f,  8.0f,  1.0f,  0.3f, VOXEL_BLOCK_SAND,  VOXEL_BLOCK_SAND,  0,   999 },
-	/* MEADOW    */ { 0.0f, 15.0f,  3.0f,  0.5f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  120, 165 },
-	/* FOREST    */ { 2.0f, 18.0f,  3.0f,  0.8f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  25,  165 },
-	/* MOUNTAINS */ { 20.0f, 45.0f, 12.0f, 2.5f, VOXEL_BLOCK_STONE, VOXEL_BLOCK_STONE, 300, 115 },
+	/* DESERT    */ { 0.0f,  8.0f,  1.0f,  0.3f, VOXEL_BLOCK_SAND,  VOXEL_BLOCK_STONE,  0,   999 },
+	/* MEADOW    */ { 0.0f, 15.0f,  3.0f,  0.5f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  400, 165 },
+	/* FOREST    */ { 2.0f, 18.0f,  3.0f,  0.8f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  15,   165 },
+	/* MOUNTAINS */ { 20.0f, 45.0f, 12.0f, 2.5f, VOXEL_BLOCK_STONE, VOXEL_BLOCK_STONE, 700, 70 },
 };
 
 // Biome centers in (temperature, humidity) space. Noise outputs are in [-1, 1].
@@ -254,7 +254,6 @@ BiomeParams VoxelTerrainGenerator::_get_blended_params(const float *p_weights, i
 	result.detail_scale = 0.0f;
 	result.density_3d_weight = 0.0f;
 	float snow_line_f = 0.0f;
-	float tree_density_f = 0.0f;
 
 	int dominant = 0;
 	for (int i = 0; i < p_biome_count; i++) {
@@ -264,7 +263,6 @@ BiomeParams VoxelTerrainGenerator::_get_blended_params(const float *p_weights, i
 		result.detail_scale += bp.detail_scale * p_weights[i];
 		result.density_3d_weight += bp.density_3d_weight * p_weights[i];
 		snow_line_f += (float)bp.snow_line * p_weights[i];
-		tree_density_f += (float)bp.tree_density * p_weights[i];
 		if (p_weights[i] > p_weights[dominant]) {
 			dominant = i;
 		}
@@ -274,7 +272,11 @@ BiomeParams VoxelTerrainGenerator::_get_blended_params(const float *p_weights, i
 	result.surface_block = dominant_bp.surface_block;
 	result.subsurface_block = dominant_bp.subsurface_block;
 	result.snow_line = (int)snow_line_f;
-	result.tree_density = (int)(tree_density_f + 0.5f);
+	// tree_density is a hash modulus (lower = denser), so linear averaging
+	// produces wrong results: forest=8 blended with meadow=400 yields ~47
+	// even at 90% forest weight, making forests 6x sparser than intended.
+	// Use the dominant biome's value directly instead.
+	result.tree_density = dominant_bp.tree_density;
 
 	return result;
 }
@@ -503,17 +505,27 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 
 			// Dithered surface block: probabilistic selection by biome weights
 			// eliminates the hard colour snap at biome borders.
+			// Only applied in genuine transition zones (dominant weight < BIOME_DITHER_THRESHOLD)
+			// to prevent scattered foreign blocks (sand/stone stippling) deep inside a biome.
 			{
-				uint32_t bseed = _hash_u32((uint32_t)seed ^ ((uint32_t)wx * 374761393U) ^ ((uint32_t)wz * 668265263U));
-				float r = (float)(bseed & 0xFFFFu) * (1.0f / 65536.0f);
-				float cumul = 0.0f;
-				for (int bi = 0; bi < biome_count; bi++) {
-					cumul += weights[bi];
-					if (r < cumul) {
-						BiomeParams bp_bi = _get_biome_params_at(bi);
-						blended[x][z].surface_block = bp_bi.surface_block;
-						blended[x][z].subsurface_block = bp_bi.subsurface_block;
-						break;
+				int dominant_bi = 0;
+				for (int bi = 1; bi < biome_count; bi++) {
+					if (weights[bi] > weights[dominant_bi]) {
+						dominant_bi = bi;
+					}
+				}
+				if (weights[dominant_bi] < BIOME_DITHER_THRESHOLD) {
+					uint32_t bseed = _hash_u32((uint32_t)seed ^ ((uint32_t)wx * 374761393U) ^ ((uint32_t)wz * 668265263U));
+					float r = (float)(bseed & 0xFFFFu) * (1.0f / 65536.0f);
+					float cumul = 0.0f;
+					for (int bi = 0; bi < biome_count; bi++) {
+						cumul += weights[bi];
+						if (r < cumul) {
+							BiomeParams bp_bi = _get_biome_params_at(bi);
+							blended[x][z].surface_block = bp_bi.surface_block;
+							blended[x][z].subsurface_block = bp_bi.subsurface_block;
+							break;
+						}
 					}
 				}
 			}

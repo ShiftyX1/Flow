@@ -33,9 +33,11 @@ private:
 	bool verbose_logging = true;
 
 	// --- Day/Night Cycle ---
-	float time_of_day = 12.0f; // 0.0–24.0 hours.
+	float start_time_of_day = 7.0f; // Editor-set start time (0.0–24.0).
+	float time_of_day = 7.0f; // Runtime current time (0.0–24.0 hours).
 	float day_length_seconds = 600.0f; // Real seconds per full day cycle.
 	bool auto_advance_time = false;
+	float time_speed = 1.0f; // Multiplier for time advancement speed.
 
 	// --- Fog ---
 	bool fog_enabled = true;
@@ -147,6 +149,9 @@ public:
 	bool get_verbose_logging() const { return verbose_logging; }
 
 	// --- Day/Night Cycle ---
+	void set_start_time_of_day(float p_time);
+	float get_start_time_of_day() const { return start_time_of_day; }
+
 	void set_time_of_day(float p_time);
 	float get_time_of_day() const { return time_of_day; }
 
@@ -155,6 +160,15 @@ public:
 
 	void set_auto_advance_time(bool p_enabled) { auto_advance_time = p_enabled; }
 	bool get_auto_advance_time() const { return auto_advance_time; }
+
+	void set_time_speed(float p_speed);
+	float get_time_speed() const { return time_speed; }
+
+	// Convenience API.
+	void advance_time(float p_hours);
+	bool is_daytime() const;
+	bool is_nighttime() const;
+	float get_day_factor() const;
 
 	void set_fog_enabled(bool p_enabled) { fog_enabled = p_enabled; }
 	bool get_fog_enabled() const { return fog_enabled; }

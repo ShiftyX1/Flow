@@ -57,6 +57,31 @@
 				Performs a voxel raycast from [param origin] in [param direction]. Returns a Dictionary with keys "position" (Vector3), "normal" (Vector3), "block_id" (int), and "block_pos" (Vector3i) if a solid block is hit, or an empty Dictionary if nothing is hit.
 			</description>
 		</method>
+		<method name="advance_time">
+			<return type="void" />
+			<param index="0" name="hours" type="float" />
+			<description>
+				Advances [member day_night_time_of_day] by [param hours] (can be negative to rewind). Wraps around 0–24 automatically. Immediately updates sun, moon, ambient light, and fog.
+			</description>
+		</method>
+		<method name="is_daytime" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the current time is between 6:00 and 18:00.
+			</description>
+		</method>
+		<method name="is_nighttime" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the current time is before 6:00 or at/after 18:00.
+			</description>
+		</method>
+		<method name="get_day_factor" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns a smooth factor (0.0–1.0) representing how "daytime" it currently is. 1.0 = full day (7:00–17:00), 0.0 = full night (19:00–5:00), with smooth transitions during sunrise and sunset.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="-1">
@@ -74,14 +99,20 @@
 		<member name="block_registry" type="VoxelBlockRegistry" setter="set_block_registry" getter="get_block_registry">
 			The block registry resource that defines block types, colors, and textures. If not set, a default registry with 10 built-in block types is created automatically.
 		</member>
-		<member name="day_night_time_of_day" type="float" setter="set_time_of_day" getter="get_time_of_day" default="12.0">
-			Current time of day in hours (0.0–24.0). 0/24 = midnight, 6 = sunrise, 12 = noon, 18 = sunset. Controls sun/moon rotation, ambient light color, and fog color when environment nodes are assigned via [member env_sun_path], [member env_moon_path], and [member env_environment_path].
+		<member name="day_night_start_time" type="float" setter="set_start_time_of_day" getter="get_start_time_of_day" default="7.0">
+			The time of day (0.0–24.0) at which the game starts. Applied to [member day_night_time_of_day] when the scene enters the tree at runtime. Changing this in the editor does not affect the live preview — use [member day_night_time_of_day] to preview different times.
+		</member>
+		<member name="day_night_time_of_day" type="float" setter="set_time_of_day" getter="get_time_of_day" default="7.0">
+			Current time of day in hours (0.0–24.0). 0/24 = midnight, 6 = sunrise, 12 = noon, 18 = sunset. Controls sun/moon rotation, ambient light color, and fog color when environment nodes are assigned via [member env_sun_path], [member env_moon_path], and [member env_environment_path]. Dragging the slider in the editor updates the scene in real-time for previewing. At runtime, this is overwritten by [member day_night_start_time] on startup and then advances automatically if [member day_night_auto_advance] is enabled.
 		</member>
 		<member name="day_night_day_length" type="float" setter="set_day_length_seconds" getter="get_day_length_seconds" default="600.0">
 			Duration of one full day/night cycle in real seconds. Only used when [member day_night_auto_advance] is [code]true[/code]. Valid range: 10 to 3600 seconds.
 		</member>
 		<member name="day_night_auto_advance" type="bool" setter="set_auto_advance_time" getter="get_auto_advance_time" default="false">
 			If [code]true[/code], [member day_night_time_of_day] advances automatically each frame based on [member day_night_day_length]. Emits [signal time_of_day_changed] each frame.
+		</member>
+		<member name="day_night_time_speed" type="float" setter="set_time_speed" getter="get_time_speed" default="1.0">
+			Multiplier for the automatic time advancement speed. 1.0 = normal, 2.0 = double speed, 0.5 = half speed. Only affects time when [member day_night_auto_advance] is [code]true[/code]. Valid range: 0.0 to 100.0.
 		</member>
 		<member name="fog_enabled" type="bool" setter="set_fog_enabled" getter="get_fog_enabled" default="true">
 			If [code]true[/code], distance fog is applied to the environment. Fog fades distant terrain to the sky color, matching the current time of day.
@@ -117,7 +148,7 @@
 		<signal name="time_of_day_changed">
 			<param index="0" name="time" type="float" />
 			<description>
-				Emitted every frame when [member day_night_auto_advance] is [code]true[/code], with the current [member day_night_time_of_day] value.
+				Emitted when the time of day changes — either every frame when [member day_night_auto_advance] is [code]true[/code], or when [method set_time_of_day] / [method advance_time] is called.
 			</description>
 		</signal>
 	</signals>

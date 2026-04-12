@@ -38,10 +38,18 @@ void VoxelWorld::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_time_of_day", "time"), &VoxelWorld::set_time_of_day);
 	ClassDB::bind_method(D_METHOD("get_time_of_day"), &VoxelWorld::get_time_of_day);
+	ClassDB::bind_method(D_METHOD("set_start_time_of_day", "time"), &VoxelWorld::set_start_time_of_day);
+	ClassDB::bind_method(D_METHOD("get_start_time_of_day"), &VoxelWorld::get_start_time_of_day);
 	ClassDB::bind_method(D_METHOD("set_day_length_seconds", "seconds"), &VoxelWorld::set_day_length_seconds);
 	ClassDB::bind_method(D_METHOD("get_day_length_seconds"), &VoxelWorld::get_day_length_seconds);
 	ClassDB::bind_method(D_METHOD("set_auto_advance_time", "enabled"), &VoxelWorld::set_auto_advance_time);
 	ClassDB::bind_method(D_METHOD("get_auto_advance_time"), &VoxelWorld::get_auto_advance_time);
+	ClassDB::bind_method(D_METHOD("set_time_speed", "speed"), &VoxelWorld::set_time_speed);
+	ClassDB::bind_method(D_METHOD("get_time_speed"), &VoxelWorld::get_time_speed);
+	ClassDB::bind_method(D_METHOD("advance_time", "hours"), &VoxelWorld::advance_time);
+	ClassDB::bind_method(D_METHOD("is_daytime"), &VoxelWorld::is_daytime);
+	ClassDB::bind_method(D_METHOD("is_nighttime"), &VoxelWorld::is_nighttime);
+	ClassDB::bind_method(D_METHOD("get_day_factor"), &VoxelWorld::get_day_factor);
 	ClassDB::bind_method(D_METHOD("set_fog_enabled", "enabled"), &VoxelWorld::set_fog_enabled);
 	ClassDB::bind_method(D_METHOD("get_fog_enabled"), &VoxelWorld::get_fog_enabled);
 	ClassDB::bind_method(D_METHOD("set_fog_distance_ratio", "ratio"), &VoxelWorld::set_fog_distance_ratio);
@@ -74,9 +82,11 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
 
 	ADD_GROUP("Day Night Cycle", "day_night_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_night_start_time", PROPERTY_HINT_RANGE, "0.0,24.0,0.01"), "set_start_time_of_day", "get_start_time_of_day");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_night_time_of_day", PROPERTY_HINT_RANGE, "0.0,24.0,0.01"), "set_time_of_day", "get_time_of_day");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_night_day_length", PROPERTY_HINT_RANGE, "10.0,3600.0,1.0,suffix:s"), "set_day_length_seconds", "get_day_length_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "day_night_auto_advance"), "set_auto_advance_time", "get_auto_advance_time");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_night_time_speed", PROPERTY_HINT_RANGE, "0.0,100.0,0.1"), "set_time_speed", "get_time_speed");
 
 	ADD_GROUP("Fog", "fog_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "fog_enabled"), "set_fog_enabled", "get_fog_enabled");
@@ -159,11 +169,23 @@ Ref<VoxelBiomeRegistry> VoxelWorld::get_biome_registry() const {
 
 // --- Day/Night Cycle setters ---
 
+void VoxelWorld::set_start_time_of_day(float p_time) {
+	start_time_of_day = Math::fmod(p_time, 24.0f);
+	if (start_time_of_day < 0.0f) {
+		start_time_of_day += 24.0f;
+	}
+}
+
 void VoxelWorld::set_time_of_day(float p_time) {
 	time_of_day = Math::fmod(p_time, 24.0f);
 	if (time_of_day < 0.0f) {
 		time_of_day += 24.0f;
 	}
+	// Live-update lights/fog when changed from editor or API.
+	if (is_inside_tree()) {
+		_update_day_night_cycle(0.0f);
+	}
+	emit_signal("time_of_day_changed", time_of_day);
 }
 
 void VoxelWorld::set_day_length_seconds(float p_seconds) {
@@ -172,6 +194,48 @@ void VoxelWorld::set_day_length_seconds(float p_seconds) {
 
 void VoxelWorld::set_fog_distance_ratio(float p_ratio) {
 	fog_distance_ratio = CLAMP(p_ratio, 0.3f, 1.0f);
+}
+
+void VoxelWorld::set_time_speed(float p_speed) {
+	time_speed = CLAMP(p_speed, 0.0f, 100.0f);
+}
+
+// Compute a smooth factor for how "daytime" it is. 1.0 = full day, 0.0 = full night.
+static float _compute_day_factor(float p_time) {
+	// Sunrise at 5-7, sunset at 17-19. Smooth transitions.
+	if (p_time >= 7.0f && p_time <= 17.0f) {
+		return 1.0f; // Full day.
+	} else if (p_time >= 19.0f || p_time <= 5.0f) {
+		return 0.0f; // Full night.
+	} else if (p_time > 5.0f && p_time < 7.0f) {
+		return (p_time - 5.0f) / 2.0f; // Sunrise.
+	} else {
+		return 1.0f - (p_time - 17.0f) / 2.0f; // Sunset.
+	}
+}
+
+// Compute a "sunset/sunrise" factor: peaks at dawn/dusk, zero at noon/midnight.
+static float _compute_twilight_factor(float p_time) {
+	// Peaks at 6.0 and 18.0.
+	float dawn = 1.0f - CLAMP(Math::abs(p_time - 6.0f) / 1.5f, 0.0f, 1.0f);
+	float dusk = 1.0f - CLAMP(Math::abs(p_time - 18.0f) / 1.5f, 0.0f, 1.0f);
+	return MAX(dawn, dusk);
+}
+
+void VoxelWorld::advance_time(float p_hours) {
+	set_time_of_day(time_of_day + p_hours);
+}
+
+bool VoxelWorld::is_daytime() const {
+	return time_of_day >= 6.0f && time_of_day < 18.0f;
+}
+
+bool VoxelWorld::is_nighttime() const {
+	return !is_daytime();
+}
+
+float VoxelWorld::get_day_factor() const {
+	return _compute_day_factor(time_of_day);
 }
 
 void VoxelWorld::set_sun_path(const NodePath &p_path) {
@@ -223,32 +287,10 @@ void VoxelWorld::_resolve_environment_nodes() {
 	}
 }
 
-// Compute a smooth factor for how "daytime" it is. 1.0 = full day, 0.0 = full night.
-static float _compute_day_factor(float p_time) {
-	// Sunrise at 5-7, sunset at 17-19. Smooth transitions.
-	if (p_time >= 7.0f && p_time <= 17.0f) {
-		return 1.0f; // Full day.
-	} else if (p_time >= 19.0f || p_time <= 5.0f) {
-		return 0.0f; // Full night.
-	} else if (p_time > 5.0f && p_time < 7.0f) {
-		return (p_time - 5.0f) / 2.0f; // Sunrise.
-	} else {
-		return 1.0f - (p_time - 17.0f) / 2.0f; // Sunset.
-	}
-}
-
-// Compute a "sunset/sunrise" factor: peaks at dawn/dusk, zero at noon/midnight.
-static float _compute_twilight_factor(float p_time) {
-	// Peaks at 6.0 and 18.0.
-	float dawn = 1.0f - CLAMP(Math::abs(p_time - 6.0f) / 1.5f, 0.0f, 1.0f);
-	float dusk = 1.0f - CLAMP(Math::abs(p_time - 18.0f) / 1.5f, 0.0f, 1.0f);
-	return MAX(dawn, dusk);
-}
-
 void VoxelWorld::_update_day_night_cycle(float p_delta) {
 	// Advance time.
-	if (auto_advance_time && day_length_seconds > 0.0f) {
-		time_of_day += (p_delta / day_length_seconds) * 24.0f;
+	if (auto_advance_time && day_length_seconds > 0.0f && p_delta > 0.0f) {
+		time_of_day += (p_delta / day_length_seconds) * 24.0f * time_speed;
 		if (time_of_day >= 24.0f) {
 			time_of_day -= 24.0f;
 		}
@@ -335,23 +377,26 @@ void VoxelWorld::_notification(int p_what) {
 				if (verbose_logging) {
 					print_line("[VoxelWorld] Editor mode — skipping generation.");
 				}
+				_resolve_environment_nodes();
+				set_process(true);
 				return;
 			}
 			if (verbose_logging) {
 				print_line("[VoxelWorld] NOTIFICATION_READY received, initializing...");
 			}
+			time_of_day = start_time_of_day;
 			set_process(true);
 			_resolve_environment_nodes();
 			_initialize_world();
 		} break;
 
 		case NOTIFICATION_PROCESS: {
+			float delta = get_process_delta_time();
+			_update_day_night_cycle(delta);
+
 			if (!initialized) {
 				return;
 			}
-
-			float delta = get_process_delta_time();
-			_update_day_night_cycle(delta);
 
 			_integrate_finished_chunks();
 

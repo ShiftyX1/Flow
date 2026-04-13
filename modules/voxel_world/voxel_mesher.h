@@ -24,10 +24,11 @@ public:
 	// Pointers to the block arrays of the four horizontal neighbours (null = treat as air).
 	// px = +X neighbour, nx = -X neighbour, pz = +Z neighbour, nz = -Z neighbour.
 	struct NeighborBlocks {
-		const uint8_t *px = nullptr;
-		const uint8_t *nx = nullptr;
-		const uint8_t *pz = nullptr;
-		const uint8_t *nz = nullptr;
+		const uint8_t *px;
+		const uint8_t *nx;
+		const uint8_t *pz;
+		const uint8_t *nz;
+		NeighborBlocks() : px(nullptr), nx(nullptr), pz(nullptr), nz(nullptr) {}
 	};
 
 	// Build multiple mesh surfaces: one per unique texture + one for untextured faces.

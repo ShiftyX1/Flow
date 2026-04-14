@@ -509,6 +509,24 @@ void VoxelWorld::_update_day_night_cycle(float p_delta) {
 	// Update voxel shader sun_intensity so voxel lighting tracks day/night.
 	if (voxel_shader_material.is_valid()) {
 		voxel_shader_material->set_shader_parameter("sun_intensity", day_factor);
+
+		// Push updated sun_intensity to all live chunk surface materials.
+		for (const KeyValue<Vector2i, VoxelChunk *> &E : loaded_chunks) {
+			MeshInstance3D *mi = E.value->get_mesh_instance();
+			if (!mi) {
+				continue;
+			}
+			Ref<Mesh> mesh = mi->get_mesh();
+			if (mesh.is_null()) {
+				continue;
+			}
+			for (int s = 0; s < mesh->get_surface_count(); s++) {
+				Ref<ShaderMaterial> sm = mesh->surface_get_material(s);
+				if (sm.is_valid() && sm->get_shader() == voxel_shader) {
+					sm->set_shader_parameter("sun_intensity", day_factor);
+				}
+			}
+		}
 	}
 }
 

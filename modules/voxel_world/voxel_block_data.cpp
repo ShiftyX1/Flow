@@ -11,6 +11,7 @@ const Color VoxelBlockData::block_colors[VOXEL_BLOCK_TYPE_MAX] = {
 	Color(0.40f, 0.26f, 0.13f),     // WOOD (dark brown)
 	Color(0.16f, 0.38f, 0.14f),     // LEAVES (dark green)
 	Color(0.20f, 0.20f, 0.20f),     // BEDROCK (dark gray)
+	Color(1.0f, 0.8f, 0.3f, 1.0f),  // TORCH (warm orange-yellow)
 };
 
 const char *VoxelBlockData::block_names[VOXEL_BLOCK_TYPE_MAX] = {
@@ -24,4 +25,33 @@ const char *VoxelBlockData::block_names[VOXEL_BLOCK_TYPE_MAX] = {
 	"Wood",
 	"Leaves",
 	"Bedrock",
+	"Torch",
+};
+
+const uint8_t VoxelBlockData::block_emission[VOXEL_BLOCK_TYPE_MAX] = {
+	0,  // AIR
+	0,  // GRASS
+	0,  // DIRT
+	0,  // STONE
+	0,  // SAND
+	0,  // WATER
+	0,  // SNOW
+	0,  // WOOD
+	0,  // LEAVES
+	0,  // BEDROCK
+	14, // TORCH
+};
+
+const uint8_t VoxelBlockData::block_light_opacity[VOXEL_BLOCK_TYPE_MAX] = {
+	0,  // AIR (fully transparent to light)
+	15, // GRASS (fully opaque)
+	15, // DIRT
+	15, // STONE
+	15, // SAND
+	2,  // WATER (absorbs some light)
+	15, // SNOW
+	15, // WOOD
+	1,  // LEAVES (slightly transparent)
+	15, // BEDROCK
+	0,  // TORCH (fully transparent to light)
 };

@@ -76,7 +76,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "block_size", PROPERTY_HINT_RANGE, "0.1,10.0,0.1"), "set_block_size", "get_block_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sea_level", PROPERTY_HINT_RANGE, "0,191,1"), "set_sea_level", "get_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Air,Grass,Dirt,Stone,Sand,Water,Snow,Wood,Leaves,Bedrock"), "set_alpha_block_flags", "get_alpha_block_flags");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Air,Grass,Dirt,Stone,Sand,Water,Snow,Wood,Leaves,Bedrock,Torch"), "set_alpha_block_flags", "get_alpha_block_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
@@ -112,6 +112,7 @@ void VoxelWorld::_bind_methods() {
 	BIND_ENUM_CONSTANT(VOXEL_BLOCK_WOOD);
 	BIND_ENUM_CONSTANT(VOXEL_BLOCK_LEAVES);
 	BIND_ENUM_CONSTANT(VOXEL_BLOCK_BEDROCK);
+	BIND_ENUM_CONSTANT(VOXEL_BLOCK_TORCH);
 }
 
 VoxelWorld::VoxelWorld() {
@@ -368,6 +369,11 @@ void VoxelWorld::_update_day_night_cycle(float p_delta) {
 			}
 		}
 	}
+
+	// Update voxel shader sun_intensity so voxel lighting tracks day/night.
+	if (voxel_shader_material.is_valid()) {
+		voxel_shader_material->set_shader_parameter("sun_intensity", day_factor);
+	}
 }
 
 void VoxelWorld::_notification(int p_what) {
@@ -454,6 +460,46 @@ void VoxelWorld::_initialize_world() {
 	material->set_shading_mode(BaseMaterial3D::SHADING_MODE_PER_PIXEL);
 	material->set_texture_filter(texture_filter);
 
+	// Create voxel lighting shader + material.
+	{
+		voxel_shader.instantiate();
+		String shader_code = R"(
+shader_type spatial;
+render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
+uniform sampler2D texture_albedo : source_color, filter_nearest, repeat_enable;
+uniform float sun_intensity : hint_range(0.0, 1.0) = 1.0;
+uniform bool use_texture = false;
+varying vec4 voxel_light;
+void vertex() {
+	voxel_light = CUSTOM0;
+}
+void fragment() {
+	vec4 base = use_texture ? texture(texture_albedo, UV) : vec4(1.0);
+	ALBEDO = base.rgb * COLOR.rgb;
+	// Voxel light modulation.
+	float sun = voxel_light.r * sun_intensity;
+	float block = voxel_light.g;
+	float ao = voxel_light.b;
+	float combined = max(sun, block);
+	float brightness = combined * ao;
+	// Minimum ambient so things are never pitch black.
+	brightness = max(brightness, 0.03);
+	ALBEDO *= brightness;
+	// Block light adds emissive glow (warm color).
+	EMISSION = vec3(0.95, 0.7, 0.4) * block * ao * 0.5;
+	if (use_texture) {
+		ALPHA = base.a * COLOR.a;
+		ALPHA_SCISSOR_THRESHOLD = 0.5;
+	}
+}
+)";
+		voxel_shader->set_code(shader_code);
+		voxel_shader_material.instantiate();
+		voxel_shader_material->set_shader(voxel_shader);
+		voxel_shader_material->set_shader_parameter("sun_intensity", 1.0f);
+		voxel_shader_material->set_shader_parameter("use_texture", false);
+	}
+
 	initialized = true;
 
 	if (verbose_logging) {
@@ -472,6 +518,8 @@ void VoxelWorld::_cleanup_world() {
 		WorkerThreadPool::get_singleton()->wait_for_task_completion(E.value);
 	}
 	pending_remesh.clear();
+
+	dirty_light.clear();
 
 	{
 		MutexLock lock(finished_mutex);
@@ -496,6 +544,8 @@ void VoxelWorld::_cleanup_world() {
 	}
 
 	material.unref();
+	voxel_shader.unref();
+	voxel_shader_material.unref();
 	initialized = false;
 	last_camera_chunk = Vector2i(INT32_MAX, INT32_MAX);
 	if (verbose_logging) {
@@ -574,9 +624,31 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 
 	if (data->is_remesh) {
 		result.blocks = data->pre_blocks;
+		result.light_data = data->pre_light;
 	} else {
 		result.blocks = world->generator->generate_chunk_data(data->chunk_x, data->chunk_z);
 	}
+
+	// --- Light propagation ---
+	const int total_blocks = VoxelTerrainGenerator::CHUNK_SIZE_X * VoxelTerrainGenerator::CHUNK_SIZE_Y * VoxelTerrainGenerator::CHUNK_SIZE_Z;
+	if (result.light_data.size() != total_blocks) {
+		result.light_data.resize(total_blocks);
+		memset(result.light_data.ptrw(), 0, total_blocks);
+	}
+
+	VoxelLightMap::NeighborData light_nb;
+	// Block arrays.
+	if (data->neighbor_px.size() > 0) { light_nb.blocks_px = data->neighbor_px.ptr(); }
+	if (data->neighbor_nx.size() > 0) { light_nb.blocks_nx = data->neighbor_nx.ptr(); }
+	if (data->neighbor_pz.size() > 0) { light_nb.blocks_pz = data->neighbor_pz.ptr(); }
+	if (data->neighbor_nz.size() > 0) { light_nb.blocks_nz = data->neighbor_nz.ptr(); }
+	// Light arrays.
+	if (data->neighbor_light_px.size() > 0) { light_nb.light_px = data->neighbor_light_px.ptr(); }
+	if (data->neighbor_light_nx.size() > 0) { light_nb.light_nx = data->neighbor_light_nx.ptr(); }
+	if (data->neighbor_light_pz.size() > 0) { light_nb.light_pz = data->neighbor_light_pz.ptr(); }
+	if (data->neighbor_light_nz.size() > 0) { light_nb.light_nz = data->neighbor_light_nz.ptr(); }
+
+	VoxelLightMap::propagate_all(result.light_data.ptrw(), result.blocks.ptr(), light_nb);
 
 	// Build NeighborBlocks from snapshots captured on the main thread at queue time.
 	VoxelMesher::NeighborBlocks nb;
@@ -585,7 +657,14 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	if (data->neighbor_pz.size() > 0) { nb.pz = data->neighbor_pz.ptr(); }
 	if (data->neighbor_nz.size() > 0) { nb.nz = data->neighbor_nz.ptr(); }
 
-	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, world->alpha_block_flags, nb);
+	// Build NeighborLight from snapshots.
+	VoxelMesher::NeighborLight mesh_nl;
+	if (data->neighbor_light_px.size() > 0) { mesh_nl.px = data->neighbor_light_px.ptr(); }
+	if (data->neighbor_light_nx.size() > 0) { mesh_nl.nx = data->neighbor_light_nx.ptr(); }
+	if (data->neighbor_light_pz.size() > 0) { mesh_nl.pz = data->neighbor_light_pz.ptr(); }
+	if (data->neighbor_light_nz.size() > 0) { mesh_nl.nz = data->neighbor_light_nz.ptr(); }
+
+	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, world->alpha_block_flags, nb, result.light_data.ptr(), mesh_nl);
 
 	{
 		MutexLock lock(world->finished_mutex);
@@ -612,10 +691,18 @@ void VoxelWorld::_request_chunk(int p_cx, int p_cz) {
 		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_cx + dx, p_cz + dz));
 		return nb ? (*nb)->get_blocks() : Vector<uint8_t>();
 	};
+	auto snapshot_light = [&](int dx, int dz) -> Vector<uint8_t> {
+		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_cx + dx, p_cz + dz));
+		return nb ? (*nb)->get_light_data() : Vector<uint8_t>();
+	};
 	task_data->neighbor_px = snapshot_nb(1, 0);
 	task_data->neighbor_nx = snapshot_nb(-1, 0);
 	task_data->neighbor_pz = snapshot_nb(0, 1);
 	task_data->neighbor_nz = snapshot_nb(0, -1);
+	task_data->neighbor_light_px = snapshot_light(1, 0);
+	task_data->neighbor_light_nx = snapshot_light(-1, 0);
+	task_data->neighbor_light_pz = snapshot_light(0, 1);
+	task_data->neighbor_light_nz = snapshot_light(0, -1);
 
 	int64_t task_id = WorkerThreadPool::get_singleton()->add_native_task(
 			&VoxelWorld::_chunk_generation_task, task_data, false, "VoxelChunkGen");
@@ -644,11 +731,25 @@ void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<Voxe
 	array_mesh.instantiate();
 
 	for (int s = 0; s < p_surfaces.size(); s++) {
-		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, p_surfaces[s].arrays);
+		uint64_t fmt_flags = p_surfaces[s].custom_format_flags;
+		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, p_surfaces[s].arrays, Array(), Dictionary(), fmt_flags);
 		if (p_surfaces[s].shader_material.is_valid()) {
 			Ref<ShaderMaterial> mat = p_surfaces[s].shader_material;
 			if (p_surfaces[s].texture.is_valid() && mat->get_shader().is_valid()) {
 				mat->set_shader_parameter("texture_albedo", p_surfaces[s].texture);
+			}
+			array_mesh->surface_set_material(s, mat);
+		} else if (fmt_flags != 0 && voxel_shader_material.is_valid()) {
+			// Surface has CUSTOM0 light data — use voxel lighting shader.
+			Ref<ShaderMaterial> mat;
+			mat.instantiate();
+			mat->set_shader(voxel_shader);
+			mat->set_shader_parameter("sun_intensity", voxel_shader_material->get_shader_parameter("sun_intensity"));
+			if (p_surfaces[s].texture.is_valid()) {
+				mat->set_shader_parameter("texture_albedo", p_surfaces[s].texture);
+				mat->set_shader_parameter("use_texture", true);
+			} else {
+				mat->set_shader_parameter("use_texture", false);
 			}
 			array_mesh->surface_set_material(s, mat);
 		} else if (p_surfaces[s].texture.is_valid()) {
@@ -694,15 +795,48 @@ void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 	nb.nx = snap(-1, 0);
 	nb.pz = snap(0, 1);
 	nb.nz = snap(0, -1);
+
+	// Re-propagate light for this chunk.
+	p_chunk->ensure_light_data();
+	memset(p_chunk->get_light_data_rw().ptrw(), 0, p_chunk->get_light_data().size());
+
+	VoxelLightMap::NeighborData light_nb;
+	auto snap_blocks_vec = [&](int dx, int dz) -> const uint8_t * {
+		VoxelChunk *const *n = loaded_chunks.getptr(Vector2i(cpos.x + dx, cpos.y + dz));
+		return n ? (*n)->get_blocks().ptr() : nullptr;
+	};
+	auto snap_light = [&](int dx, int dz) -> const uint8_t * {
+		VoxelChunk *const *n = loaded_chunks.getptr(Vector2i(cpos.x + dx, cpos.y + dz));
+		return (n && (*n)->get_light_data().size() > 0) ? (*n)->get_light_data().ptr() : nullptr;
+	};
+	light_nb.blocks_px = snap_blocks_vec(1, 0);
+	light_nb.blocks_nx = snap_blocks_vec(-1, 0);
+	light_nb.blocks_pz = snap_blocks_vec(0, 1);
+	light_nb.blocks_nz = snap_blocks_vec(0, -1);
+	light_nb.light_px = snap_light(1, 0);
+	light_nb.light_nx = snap_light(-1, 0);
+	light_nb.light_pz = snap_light(0, 1);
+	light_nb.light_nz = snap_light(0, -1);
+
+	VoxelLightMap::propagate_all(p_chunk->get_light_data_rw().ptrw(), p_chunk->get_blocks().ptr(), light_nb);
+
+	VoxelMesher::NeighborLight mesh_nl;
+	mesh_nl.px = snap_light(1, 0);
+	mesh_nl.nx = snap_light(-1, 0);
+	mesh_nl.pz = snap_light(0, 1);
+	mesh_nl.nz = snap_light(0, -1);
+
 	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(
-			p_chunk->get_blocks(), block_size, block_registry, alpha_block_flags, nb);
+			p_chunk->get_blocks(), block_size, block_registry, alpha_block_flags, nb,
+			p_chunk->get_light_data().ptr(), mesh_nl);
 	_apply_surfaces_to_chunk(p_chunk, surfaces);
 }
 
 // Queue an async background remesh for an already-loaded chunk.
 void VoxelWorld::_request_remesh(const Vector2i &p_key) {
-	// Skip if a regular load or remesh is already in flight for this key.
+	// If a regular load or remesh is already in flight, defer for next frame.
 	if (pending_chunks.has(p_key) || pending_remesh.has(p_key)) {
+		dirty_light.insert(p_key);
 		return;
 	}
 	VoxelChunk *const *chunk_ptr = loaded_chunks.getptr(p_key);
@@ -715,15 +849,24 @@ void VoxelWorld::_request_remesh(const Vector2i &p_key) {
 	task_data->key = p_key;
 	task_data->is_remesh = true;
 	task_data->pre_blocks = (*chunk_ptr)->get_blocks(); // snapshot
+	task_data->pre_light = (*chunk_ptr)->get_light_data(); // light snapshot
 
 	auto snapshot_nb = [&](int dx, int dz) -> Vector<uint8_t> {
 		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_key.x + dx, p_key.y + dz));
 		return nb ? (*nb)->get_blocks() : Vector<uint8_t>();
 	};
+	auto snapshot_light_nb = [&](int dx, int dz) -> Vector<uint8_t> {
+		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_key.x + dx, p_key.y + dz));
+		return nb ? (*nb)->get_light_data() : Vector<uint8_t>();
+	};
 	task_data->neighbor_px = snapshot_nb(1, 0);
 	task_data->neighbor_nx = snapshot_nb(-1, 0);
 	task_data->neighbor_pz = snapshot_nb(0, 1);
 	task_data->neighbor_nz = snapshot_nb(0, -1);
+	task_data->neighbor_light_px = snapshot_light_nb(1, 0);
+	task_data->neighbor_light_nx = snapshot_light_nb(-1, 0);
+	task_data->neighbor_light_pz = snapshot_light_nb(0, 1);
+	task_data->neighbor_light_nz = snapshot_light_nb(0, -1);
 
 	int64_t task_id = WorkerThreadPool::get_singleton()->add_native_task(
 			&VoxelWorld::_chunk_generation_task, task_data, false, "VoxelChunkRemesh");
@@ -756,6 +899,9 @@ void VoxelWorld::_integrate_finished_chunks() {
 			// Apply updated surfaces to the existing chunk (if still loaded).
 			VoxelChunk *const *chunk_ptr = loaded_chunks.getptr(result.key);
 			if (chunk_ptr) {
+				if (result.light_data.size() > 0) {
+					(*chunk_ptr)->set_light_data(result.light_data);
+				}
 				_apply_surfaces_to_chunk(*chunk_ptr, result.surfaces);
 			}
 			// Remesh results don't count toward the per-frame integration limit.
@@ -778,18 +924,23 @@ void VoxelWorld::_integrate_finished_chunks() {
 		VoxelChunk *chunk = memnew(VoxelChunk);
 		chunk->set_chunk_pos(result.key);
 		chunk->set_blocks(result.blocks);
+		if (result.light_data.size() > 0) {
+			chunk->set_light_data(result.light_data);
+		}
 
 		// Register the chunk and apply the pre-built surfaces (built off-thread).
 		loaded_chunks[result.key] = chunk;
 		_apply_surfaces_to_chunk(chunk, result.surfaces);
 
-		// Queue async remesh for the four loaded cardinal neighbours so their
-		// border faces are updated with awareness of this newly arrived chunk.
+		// Mark this chunk and its cardinal neighbours for light recalculation.
+		// The newly loaded chunk was generated without some neighbours' light,
+		// and neighbours need to incorporate this chunk's light at their borders.
+		dirty_light.insert(result.key);
 		const Vector2i dirs[4] = {
 			Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)
 		};
 		for (int d = 0; d < 4; d++) {
-			_request_remesh(result.key + dirs[d]);
+			dirty_light.insert(result.key + dirs[d]);
 		}
 
 		integrated++;
@@ -807,6 +958,23 @@ void VoxelWorld::_integrate_finished_chunks() {
 
 	if (integrated > 0 && verbose_logging) {
 		print_verbose("[VoxelWorld] Integrated " + itos(integrated) + " chunks this frame. Total loaded: " + itos(loaded_chunks.size()) + ".");
+	}
+
+	// Process deferred light-dirty chunks: attempt to queue remesh for each.
+	// Chunks that still can't be queued stay dirty for the next frame.
+	if (!dirty_light.is_empty()) {
+		HashSet<Vector2i> still_dirty;
+		for (const Vector2i &key : dirty_light) {
+			if (pending_chunks.has(key) || pending_remesh.has(key)) {
+				still_dirty.insert(key);
+				continue;
+			}
+			if (!loaded_chunks.has(key)) {
+				continue; // Not loaded (yet or anymore) — drop it.
+			}
+			_request_remesh(key);
+		}
+		dirty_light = still_dirty;
 	}
 }
 

@@ -2,6 +2,7 @@
 
 #include "voxel_block_registry.h"
 #include "voxel_chunk.h"
+#include "voxel_light_map.h"
 #include "voxel_mesher.h"
 #include "voxel_terrain_generator.h"
 
@@ -57,6 +58,8 @@ private:
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
 	Ref<StandardMaterial3D> material;
+	Ref<Shader> voxel_shader;
+	Ref<ShaderMaterial> voxel_shader_material;
 
 	bool initialized = false;
 	Vector2i last_camera_chunk = Vector2i(INT32_MAX, INT32_MAX);
@@ -67,6 +70,7 @@ private:
 	struct ChunkTaskResult {
 		Vector2i key;
 		Vector<uint8_t> blocks;
+		Vector<uint8_t> light_data;
 		Vector<VoxelMesher::MeshSurface> surfaces;
 		bool is_remesh = false; // true = update existing chunk, false = create new chunk
 	};
@@ -75,6 +79,8 @@ private:
 	HashMap<Vector2i, int64_t> pending_chunks; // key -> WorkerThreadPool TaskID
 	// Pending mesh-rebuild tasks for already-loaded chunks.
 	HashMap<Vector2i, int64_t> pending_remesh; // key -> WorkerThreadPool TaskID
+	// Chunks whose light needs to be recomputed (deferred when remesh can't be queued immediately).
+	HashSet<Vector2i> dirty_light;
 	// Finished results waiting to be integrated on the main thread.
 	Mutex finished_mutex;
 	Vector<ChunkTaskResult> finished_chunks;
@@ -89,6 +95,9 @@ private:
 		Vector<uint8_t> pre_blocks; // block data snapshot used for remesh tasks
 		// Snapshots of loaded neighbour block arrays at task-queue time (empty = not loaded)
 		Vector<uint8_t> neighbor_px, neighbor_nx, neighbor_pz, neighbor_nz;
+		// Light data snapshots for neighbours (used during remesh).
+		Vector<uint8_t> neighbor_light_px, neighbor_light_nx, neighbor_light_pz, neighbor_light_nz;
+		Vector<uint8_t> pre_light; // light snapshot for remesh
 	};
 	static void _chunk_generation_task(void *p_userdata);
 

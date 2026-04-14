@@ -33,6 +33,16 @@ private:
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 	bool verbose_logging = true;
 
+	// --- Chunk border debug visualization ---
+	bool show_chunk_borders = false;
+	Color chunk_border_color = Color(1.0f, 1.0f, 0.0f, 1.0f); // Yellow by default.
+	HashMap<Vector2i, MeshInstance3D *> chunk_border_instances;
+
+	void _spawn_chunk_border(const Vector2i &p_chunk_pos);
+	void _despawn_chunk_border(const Vector2i &p_chunk_pos);
+	void _rebuild_all_chunk_borders();
+	void _clear_all_chunk_borders();
+
 	// --- Day/Night Cycle ---
 	float start_time_of_day = 7.0f; // Editor-set start time (0.0–24.0).
 	float time_of_day = 7.0f; // Runtime current time (0.0–24.0 hours).
@@ -156,6 +166,13 @@ public:
 
 	void set_verbose_logging(bool p_enabled) { verbose_logging = p_enabled; }
 	bool get_verbose_logging() const { return verbose_logging; }
+
+	// --- Chunk border debug visualization ---
+	void set_show_chunk_borders(bool p_show);
+	bool get_show_chunk_borders() const { return show_chunk_borders; }
+
+	void set_chunk_border_color(const Color &p_color);
+	Color get_chunk_border_color() const { return chunk_border_color; }
 
 	// --- Day/Night Cycle ---
 	void set_start_time_of_day(float p_time);

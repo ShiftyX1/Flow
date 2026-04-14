@@ -36,6 +36,11 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_verbose_logging", "enabled"), &VoxelWorld::set_verbose_logging);
 	ClassDB::bind_method(D_METHOD("get_verbose_logging"), &VoxelWorld::get_verbose_logging);
 
+	ClassDB::bind_method(D_METHOD("set_show_chunk_borders", "show"), &VoxelWorld::set_show_chunk_borders);
+	ClassDB::bind_method(D_METHOD("get_show_chunk_borders"), &VoxelWorld::get_show_chunk_borders);
+	ClassDB::bind_method(D_METHOD("set_chunk_border_color", "color"), &VoxelWorld::set_chunk_border_color);
+	ClassDB::bind_method(D_METHOD("get_chunk_border_color"), &VoxelWorld::get_chunk_border_color);
+
 	ClassDB::bind_method(D_METHOD("set_time_of_day", "time"), &VoxelWorld::set_time_of_day);
 	ClassDB::bind_method(D_METHOD("get_time_of_day"), &VoxelWorld::get_time_of_day);
 	ClassDB::bind_method(D_METHOD("set_start_time_of_day", "time"), &VoxelWorld::set_start_time_of_day);
@@ -80,6 +85,10 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
+
+	ADD_GROUP("Chunk Borders", "chunk_border_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "chunk_border_show"), "set_show_chunk_borders", "get_show_chunk_borders");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "chunk_border_color"), "set_chunk_border_color", "get_chunk_border_color");
 
 	ADD_GROUP("Day Night Cycle", "day_night_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "day_night_start_time", PROPERTY_HINT_RANGE, "0.0,24.0,0.01"), "set_start_time_of_day", "get_start_time_of_day");
@@ -195,6 +204,133 @@ void VoxelWorld::set_day_length_seconds(float p_seconds) {
 
 void VoxelWorld::set_fog_distance_ratio(float p_ratio) {
 	fog_distance_ratio = CLAMP(p_ratio, 0.3f, 1.0f);
+}
+
+// --- Chunk border debug visualization ---
+
+// Build a wireframe-box ArrayMesh for one chunk.
+static Ref<ArrayMesh> _make_border_mesh(float sx, float sy, float sz) {
+	// 12 edges × 2 vertices = 24 vertices.
+	PackedVector3Array verts;
+	verts.resize(24);
+	Vector3 *v = verts.ptrw();
+
+	// Bottom face.
+	v[0] = Vector3(0, 0, 0);  v[1] = Vector3(sx, 0, 0);
+	v[2] = Vector3(sx, 0, 0); v[3] = Vector3(sx, 0, sz);
+	v[4] = Vector3(sx, 0, sz);v[5] = Vector3(0, 0, sz);
+	v[6] = Vector3(0, 0, sz); v[7] = Vector3(0, 0, 0);
+
+	// Top face.
+	v[8]  = Vector3(0, sy, 0);  v[9]  = Vector3(sx, sy, 0);
+	v[10] = Vector3(sx, sy, 0); v[11] = Vector3(sx, sy, sz);
+	v[12] = Vector3(sx, sy, sz);v[13] = Vector3(0, sy, sz);
+	v[14] = Vector3(0, sy, sz); v[15] = Vector3(0, sy, 0);
+
+	// Vertical edges.
+	v[16] = Vector3(0, 0, 0);   v[17] = Vector3(0, sy, 0);
+	v[18] = Vector3(sx, 0, 0);  v[19] = Vector3(sx, sy, 0);
+	v[20] = Vector3(sx, 0, sz); v[21] = Vector3(sx, sy, sz);
+	v[22] = Vector3(0, 0, sz);  v[23] = Vector3(0, sy, sz);
+
+	Array arr;
+	arr.resize(Mesh::ARRAY_MAX);
+	arr[Mesh::ARRAY_VERTEX] = verts;
+
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_LINES, arr);
+	return mesh;
+}
+
+void VoxelWorld::_spawn_chunk_border(const Vector2i &p_chunk_pos) {
+	if (chunk_border_instances.has(p_chunk_pos)) {
+		return; // already exists
+	}
+
+	float sx = VoxelChunk::SIZE_X * block_size;
+	float sy = VoxelChunk::SIZE_Y * block_size;
+	float sz = VoxelChunk::SIZE_Z * block_size;
+
+	Ref<ArrayMesh> mesh = _make_border_mesh(sx, sy, sz);
+
+	Ref<StandardMaterial3D> mat;
+	mat.instantiate();
+	mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+	mat->set_albedo(chunk_border_color);
+	mesh->surface_set_material(0, mat);
+
+	MeshInstance3D *mi = memnew(MeshInstance3D);
+	mi->set_mesh(mesh);
+	mi->set_position(Vector3(
+			p_chunk_pos.x * sx,
+			0.0f,
+			p_chunk_pos.y * sz));
+	add_child(mi);
+	mi->set_owner(nullptr);
+
+	chunk_border_instances[p_chunk_pos] = mi;
+}
+
+void VoxelWorld::_despawn_chunk_border(const Vector2i &p_chunk_pos) {
+	MeshInstance3D **ptr = chunk_border_instances.getptr(p_chunk_pos);
+	if (!ptr) {
+		return;
+	}
+	MeshInstance3D *mi = *ptr;
+	if (mi && mi->get_parent() == this) {
+		remove_child(mi);
+		memdelete(mi);
+	}
+	chunk_border_instances.erase(p_chunk_pos);
+}
+
+void VoxelWorld::_rebuild_all_chunk_borders() {
+	_clear_all_chunk_borders();
+	for (const KeyValue<Vector2i, VoxelChunk *> &kv : loaded_chunks) {
+		_spawn_chunk_border(kv.key);
+	}
+}
+
+void VoxelWorld::_clear_all_chunk_borders() {
+	for (const KeyValue<Vector2i, MeshInstance3D *> &kv : chunk_border_instances) {
+		MeshInstance3D *mi = kv.value;
+		if (mi && mi->get_parent() == this) {
+			remove_child(mi);
+			memdelete(mi);
+		}
+	}
+	chunk_border_instances.clear();
+}
+
+void VoxelWorld::set_show_chunk_borders(bool p_show) {
+	show_chunk_borders = p_show;
+	if (!is_inside_tree()) {
+		return;
+	}
+	if (show_chunk_borders) {
+		_rebuild_all_chunk_borders();
+	} else {
+		_clear_all_chunk_borders();
+	}
+}
+
+void VoxelWorld::set_chunk_border_color(const Color &p_color) {
+	chunk_border_color = p_color;
+	// Update materials on all existing border instances.
+	for (const KeyValue<Vector2i, MeshInstance3D *> &kv : chunk_border_instances) {
+		MeshInstance3D *mi = kv.value;
+		if (!mi) {
+			continue;
+		}
+		Ref<ArrayMesh> mesh = mi->get_mesh();
+		if (mesh.is_valid() && mesh->get_surface_count() > 0) {
+			Ref<StandardMaterial3D> mat = mesh->surface_get_material(0);
+			if (mat.is_valid()) {
+				mat->set_albedo(chunk_border_color);
+			}
+		}
+	}
 }
 
 void VoxelWorld::set_time_speed(float p_speed) {
@@ -932,6 +1068,11 @@ void VoxelWorld::_integrate_finished_chunks() {
 		loaded_chunks[result.key] = chunk;
 		_apply_surfaces_to_chunk(chunk, result.surfaces);
 
+		// Spawn chunk border visualizer when enabled.
+		if (show_chunk_borders) {
+			_spawn_chunk_border(result.key);
+		}
+
 		// Mark this chunk and its cardinal neighbours for light recalculation.
 		// The newly loaded chunk was generated without some neighbours' light,
 		// and neighbours need to incorporate this chunk's light at their borders.
@@ -991,6 +1132,9 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 		remove_child(mi);
 		memdelete(mi);
 	}
+
+	// Remove chunk border visualizer if enabled.
+	_despawn_chunk_border(key);
 
 	memdelete(chunk);
 	loaded_chunks.erase(key);

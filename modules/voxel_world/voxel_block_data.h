@@ -18,20 +18,27 @@ enum VoxelBlockType : uint8_t {
 	VOXEL_BLOCK_TYPE_MAX
 };
 
+class VoxelBlockRegistry;
+
 class VoxelBlockData {
 public:
-	static const Color block_colors[VOXEL_BLOCK_TYPE_MAX];
+	// Mutable cache — populated by load_from_registry() at world init.
+	static Color block_colors[VOXEL_BLOCK_TYPE_MAX];
 	static const char *block_names[VOXEL_BLOCK_TYPE_MAX];
-	static const uint8_t block_emission[VOXEL_BLOCK_TYPE_MAX];
-	static const uint8_t block_light_opacity[VOXEL_BLOCK_TYPE_MAX];
-	static const Color block_light_color[VOXEL_BLOCK_TYPE_MAX]; // OmniLight3D color for emissive blocks.
+	static bool block_solid[VOXEL_BLOCK_TYPE_MAX];
+	static bool block_transparent[VOXEL_BLOCK_TYPE_MAX];
+	static uint8_t block_emission[VOXEL_BLOCK_TYPE_MAX];
+	static uint8_t block_light_opacity[VOXEL_BLOCK_TYPE_MAX];
+	static Color block_light_color[VOXEL_BLOCK_TYPE_MAX];
+
+	static void load_from_registry(const VoxelBlockRegistry &p_registry);
 
 	static _FORCE_INLINE_ bool is_solid(VoxelBlockType p_type) {
-		return p_type != VOXEL_BLOCK_AIR && p_type != VOXEL_BLOCK_WATER && p_type != VOXEL_BLOCK_TORCH;
+		return p_type < VOXEL_BLOCK_TYPE_MAX && block_solid[p_type];
 	}
 
 	static _FORCE_INLINE_ bool is_transparent(VoxelBlockType p_type) {
-		return p_type == VOXEL_BLOCK_AIR || p_type == VOXEL_BLOCK_WATER || p_type == VOXEL_BLOCK_TORCH;
+		return p_type >= VOXEL_BLOCK_TYPE_MAX || block_transparent[p_type];
 	}
 
 	static _FORCE_INLINE_ String get_block_name(VoxelBlockType p_type) {

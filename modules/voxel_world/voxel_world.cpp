@@ -1,5 +1,6 @@
 #include "voxel_world.h"
 
+#include "voxel_block_data.h"
 #include "core/config/engine.h"
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
@@ -603,11 +604,18 @@ void VoxelWorld::_initialize_world() {
 	// If no registry assigned, create one with defaults.
 	if (block_registry.is_null()) {
 		block_registry.instantiate();
-		block_registry->setup_defaults();
 		if (verbose_logging) {
-			print_line("[VoxelWorld] No block registry set — created default registry with " + itos(block_registry->get_block_count()) + " blocks.");
+			print_line("[VoxelWorld] No block registry set — created default registry.");
 		}
 	}
+
+	// Always apply engine defaults for physics/lighting properties.
+	// This is safe: create_block() skips existing entries (preserves textures loaded from .tres),
+	// and the property assignments below set correct physics/lighting for all built-in types.
+	block_registry->setup_defaults();
+
+	// Populate thread-safe cache from registry so mesher/lighting threads read correct values.
+	VoxelBlockData::load_from_registry(*block_registry.ptr());
 
 	material.instantiate();
 	material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);

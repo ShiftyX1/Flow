@@ -8,10 +8,13 @@
 #include "editor/inspector/editor_resource_picker.h"
 #include "editor/themes/editor_scale.h"
 #include "scene/gui/button.h"
+#include "scene/gui/check_box.h"
+#include "scene/gui/color_picker.h"
 #include "scene/gui/color_rect.h"
 #include "scene/gui/label.h"
 #include "scene/gui/margin_container.h"
 #include "scene/gui/separator.h"
+#include "scene/gui/spin_box.h"
 #include "scene/scene_string_names.h"
 
 // ============================================================
@@ -90,6 +93,72 @@ void VoxelBlockRegistryEditorDialog::_shader_changed(const Ref<Resource> &p_reso
 	undo_redo->commit_action();
 }
 
+void VoxelBlockRegistryEditorDialog::_solid_toggled(bool p_pressed, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Solid");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/solid", p_block_id), p_pressed);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/solid", p_block_id), registry->get_block_solid(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_transparent_toggled(bool p_pressed, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Transparent");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/transparent", p_block_id), p_pressed);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/transparent", p_block_id), registry->get_block_transparent(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_color_changed(const Color &p_color, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Color", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/color", p_block_id), p_color);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/color", p_block_id), registry->get_block_color(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_light_opacity_changed(double p_value, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Light Opacity", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/light_opacity", p_block_id), (int)p_value);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/light_opacity", p_block_id), registry->get_block_light_opacity(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_emission_changed(double p_value, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Emission", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/emission", p_block_id), (int)p_value);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/emission", p_block_id), registry->get_block_emission(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_light_color_changed(const Color &p_color, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Light Color", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/light_color", p_block_id), p_color);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/light_color", p_block_id), registry->get_block_light_color(p_block_id));
+	undo_redo->commit_action();
+}
+
 void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 	// Clear.
 	while (block_list_vbox->get_child_count() > 0) {
@@ -119,15 +188,13 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 		block_list_vbox->add_child(header);
 
 		ColorRect *swatch = memnew(ColorRect);
-		Color block_color;
 		String block_name;
 		if (block_id >= 0 && block_id < VOXEL_BLOCK_TYPE_MAX) {
-			block_color = VoxelBlockData::block_colors[block_id];
 			block_name = VoxelBlockData::get_block_name((VoxelBlockType)block_id);
 		} else {
-			block_color = Color(1, 1, 1);
 			block_name = "Custom #" + itos(block_id);
 		}
+		Color block_color = registry->has_block(block_id) ? registry->get_block_color(block_id) : Color(1, 1, 1);
 		swatch->set_color(block_color);
 		swatch->set_custom_minimum_size(Size2(28 * EDSCALE, 28 * EDSCALE));
 		header->add_child(swatch);
@@ -212,6 +279,111 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 			picker->connect("resource_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_shader_changed).bind(block_id));
 			slot->add_child(picker);
 			row.picker_shader = picker;
+		}
+
+		// --- Physics & Lighting section ---
+		HBoxContainer *phys_row = memnew(HBoxContainer);
+		phys_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(phys_row);
+
+		// Solid
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			phys_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Solid");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			CheckBox *cb = memnew(CheckBox);
+			cb->set_pressed(registry->has_block(block_id) ? registry->get_block_solid(block_id) : true);
+			cb->connect("toggled", callable_mp(this, &VoxelBlockRegistryEditorDialog::_solid_toggled).bind(block_id));
+			slot->add_child(cb);
+			row.check_solid = cb;
+		}
+
+		// Transparent
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			phys_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Transparent");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			CheckBox *cb = memnew(CheckBox);
+			cb->set_pressed(registry->has_block(block_id) ? registry->get_block_transparent(block_id) : false);
+			cb->connect("toggled", callable_mp(this, &VoxelBlockRegistryEditorDialog::_transparent_toggled).bind(block_id));
+			slot->add_child(cb);
+			row.check_transparent = cb;
+		}
+
+		// Vertex Color
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			phys_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Vertex Color");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			ColorPickerButton *cpb = memnew(ColorPickerButton);
+			cpb->set_pick_color(registry->has_block(block_id) ? registry->get_block_color(block_id) : Color(1, 1, 1));
+			cpb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			cpb->connect("color_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_color_changed).bind(block_id));
+			slot->add_child(cpb);
+			row.picker_color = cpb;
+		}
+
+		// Light Opacity
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			phys_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Light Op.");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			SpinBox *sp = memnew(SpinBox);
+			sp->set_min(0);
+			sp->set_max(15);
+			sp->set_step(1);
+			sp->set_value(registry->has_block(block_id) ? registry->get_block_light_opacity(block_id) : 15);
+			sp->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_light_opacity_changed).bind(block_id));
+			slot->add_child(sp);
+			row.spin_opacity = sp;
+		}
+
+		// Emission
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			phys_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Emission");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			SpinBox *sp = memnew(SpinBox);
+			sp->set_min(0);
+			sp->set_max(15);
+			sp->set_step(1);
+			sp->set_value(registry->has_block(block_id) ? registry->get_block_emission(block_id) : 0);
+			sp->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_emission_changed).bind(block_id));
+			slot->add_child(sp);
+			row.spin_emission = sp;
+		}
+
+		// Light Color
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			phys_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Light Color");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			ColorPickerButton *cpb = memnew(ColorPickerButton);
+			cpb->set_pick_color(registry->has_block(block_id) ? registry->get_block_light_color(block_id) : Color(1, 1, 1));
+			cpb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			cpb->connect("color_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_light_color_changed).bind(block_id));
+			slot->add_child(cpb);
+			row.picker_light_color = cpb;
 		}
 
 		block_rows.push_back(row);

@@ -1,6 +1,11 @@
 #include "voxel_block_data.h"
 
-const Color VoxelBlockData::block_colors[VOXEL_BLOCK_TYPE_MAX] = {
+#include "voxel_block_registry.h"
+
+// Mutable cache arrays — default values match setup_defaults() in VoxelBlockRegistry.
+// Overwritten by load_from_registry() at world init.
+
+Color VoxelBlockData::block_colors[VOXEL_BLOCK_TYPE_MAX] = {
 	Color(0.0f, 0.0f, 0.0f, 0.0f), // AIR (transparent)
 	Color(0.36f, 0.63f, 0.20f),     // GRASS (green)
 	Color(0.55f, 0.37f, 0.24f),     // DIRT (brown)
@@ -28,7 +33,35 @@ const char *VoxelBlockData::block_names[VOXEL_BLOCK_TYPE_MAX] = {
 	"Torch",
 };
 
-const uint8_t VoxelBlockData::block_emission[VOXEL_BLOCK_TYPE_MAX] = {
+bool VoxelBlockData::block_solid[VOXEL_BLOCK_TYPE_MAX] = {
+	false, // AIR
+	true,  // GRASS
+	true,  // DIRT
+	true,  // STONE
+	true,  // SAND
+	false, // WATER
+	true,  // SNOW
+	true,  // WOOD
+	true,  // LEAVES
+	true,  // BEDROCK
+	false, // TORCH
+};
+
+bool VoxelBlockData::block_transparent[VOXEL_BLOCK_TYPE_MAX] = {
+	true,  // AIR
+	false, // GRASS
+	false, // DIRT
+	false, // STONE
+	false, // SAND
+	true,  // WATER
+	false, // SNOW
+	false, // WOOD
+	false, // LEAVES
+	false, // BEDROCK
+	true,  // TORCH
+};
+
+uint8_t VoxelBlockData::block_emission[VOXEL_BLOCK_TYPE_MAX] = {
 	0,  // AIR
 	0,  // GRASS
 	0,  // DIRT
@@ -42,7 +75,7 @@ const uint8_t VoxelBlockData::block_emission[VOXEL_BLOCK_TYPE_MAX] = {
 	14, // TORCH
 };
 
-const Color VoxelBlockData::block_light_color[VOXEL_BLOCK_TYPE_MAX] = {
+Color VoxelBlockData::block_light_color[VOXEL_BLOCK_TYPE_MAX] = {
 	Color(1, 1, 1),            // AIR (unused)
 	Color(1, 1, 1),            // GRASS
 	Color(1, 1, 1),            // DIRT
@@ -56,7 +89,7 @@ const Color VoxelBlockData::block_light_color[VOXEL_BLOCK_TYPE_MAX] = {
 	Color(1.0f, 0.6f, 0.2f),   // TORCH (warm orange)
 };
 
-const uint8_t VoxelBlockData::block_light_opacity[VOXEL_BLOCK_TYPE_MAX] = {
+uint8_t VoxelBlockData::block_light_opacity[VOXEL_BLOCK_TYPE_MAX] = {
 	0,  // AIR (fully transparent to light)
 	15, // GRASS (fully opaque)
 	15, // DIRT
@@ -69,3 +102,20 @@ const uint8_t VoxelBlockData::block_light_opacity[VOXEL_BLOCK_TYPE_MAX] = {
 	15, // BEDROCK
 	0,  // TORCH (fully transparent to light)
 };
+
+void VoxelBlockData::load_from_registry(const VoxelBlockRegistry &p_registry) {
+	const HashMap<int, VoxelBlockRegistry::BlockEntry> &map = p_registry.get_blocks_map();
+	for (const KeyValue<int, VoxelBlockRegistry::BlockEntry> &E : map) {
+		int id = E.key;
+		if (id < 0 || id >= VOXEL_BLOCK_TYPE_MAX) {
+			continue;
+		}
+		const VoxelBlockRegistry::BlockEntry &entry = E.value;
+		block_colors[id] = entry.color;
+		block_solid[id] = entry.solid;
+		block_transparent[id] = entry.transparent;
+		block_emission[id] = entry.emission;
+		block_light_opacity[id] = entry.light_opacity;
+		block_light_color[id] = entry.light_color;
+	}
+}

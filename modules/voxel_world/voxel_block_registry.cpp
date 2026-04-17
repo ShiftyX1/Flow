@@ -7,6 +7,62 @@
 VoxelBlockRegistry::VoxelBlockRegistry() {
 }
 
+VoxelBlockRegistry::BlockEntry VoxelBlockRegistry::_get_engine_default_entry(int p_id) {
+	BlockEntry def;
+	switch (p_id) {
+		case VOXEL_BLOCK_AIR:
+			def.color = Color(0.0f, 0.0f, 0.0f, 0.0f);
+			def.solid = false;
+			def.transparent = true;
+			def.light_opacity = 0;
+			break;
+		case VOXEL_BLOCK_GRASS:
+			def.color = Color(0.36f, 0.63f, 0.20f);
+			break;
+		case VOXEL_BLOCK_DIRT:
+			def.color = Color(0.55f, 0.37f, 0.24f);
+			break;
+		case VOXEL_BLOCK_STONE:
+			def.color = Color(0.50f, 0.50f, 0.50f);
+			break;
+		case VOXEL_BLOCK_SAND:
+			def.color = Color(0.86f, 0.82f, 0.55f);
+			break;
+		case VOXEL_BLOCK_WATER:
+			def.color = Color(0.24f, 0.46f, 0.72f, 0.7f);
+			def.solid = false;
+			def.transparent = true;
+			def.light_opacity = 2;
+			def.mesh_height = 0.875f;
+			def.collision_height = 0.875f;
+			break;
+		case VOXEL_BLOCK_SNOW:
+			def.color = Color(0.93f, 0.93f, 0.97f);
+			break;
+		case VOXEL_BLOCK_WOOD:
+			def.color = Color(0.40f, 0.26f, 0.13f);
+			break;
+		case VOXEL_BLOCK_LEAVES:
+			def.color = Color(0.16f, 0.38f, 0.14f);
+			def.light_opacity = 1;
+			break;
+		case VOXEL_BLOCK_BEDROCK:
+			def.color = Color(0.20f, 0.20f, 0.20f);
+			break;
+		case VOXEL_BLOCK_TORCH:
+			def.color = Color(1.0f, 0.8f, 0.3f, 1.0f);
+			def.solid = false;
+			def.transparent = true;
+			def.light_opacity = 0;
+			def.emission = 14;
+			def.light_color = Color(1.0f, 0.6f, 0.2f);
+			break;
+		default:
+			break;
+	}
+	return def;
+}
+
 // --- Dynamic property serialization (MeshLibrary pattern) ---
 
 bool VoxelBlockRegistry::_set(const StringName &p_name, const Variant &p_value) {
@@ -30,6 +86,18 @@ bool VoxelBlockRegistry::_set(const StringName &p_name, const Variant &p_value) 
 			set_block_mesh_height(idx, p_value);
 		} else if (what == "collision_height") {
 			set_block_collision_height(idx, p_value);
+		} else if (what == "color") {
+			set_block_color(idx, p_value);
+		} else if (what == "solid") {
+			set_block_solid(idx, p_value);
+		} else if (what == "transparent") {
+			set_block_transparent(idx, p_value);
+		} else if (what == "light_opacity") {
+			set_block_light_opacity(idx, (int)p_value);
+		} else if (what == "emission") {
+			set_block_emission(idx, (int)p_value);
+		} else if (what == "light_color") {
+			set_block_light_color(idx, p_value);
 		} else {
 			return false;
 		}
@@ -61,6 +129,18 @@ bool VoxelBlockRegistry::_get(const StringName &p_name, Variant &r_ret) const {
 		r_ret = get_block_mesh_height(idx);
 	} else if (what == "collision_height") {
 		r_ret = get_block_collision_height(idx);
+	} else if (what == "color") {
+		r_ret = get_block_color(idx);
+	} else if (what == "solid") {
+		r_ret = get_block_solid(idx);
+	} else if (what == "transparent") {
+		r_ret = get_block_transparent(idx);
+	} else if (what == "light_opacity") {
+		r_ret = get_block_light_opacity(idx);
+	} else if (what == "emission") {
+		r_ret = get_block_emission(idx);
+	} else if (what == "light_color") {
+		r_ret = get_block_light_color(idx);
 	} else {
 		return false;
 	}
@@ -83,7 +163,30 @@ void VoxelBlockRegistry::_get_property_list(List<PropertyInfo> *p_list) const {
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "texture_bottom", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"));
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "shader_material", PROPERTY_HINT_RESOURCE_TYPE, "ShaderMaterial"));
 		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "mesh_height", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"));
+		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "mesh_height", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"));
 		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "collision_height", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"));
+
+		// Physics/lighting fields: only save when they differ from engine defaults.
+		// This prevents stale .tscn files from overwriting correct create_block() defaults
+		// for blocks like AIR, WATER, TORCH.
+		BlockEntry def = _get_engine_default_entry(E.key);
+		const BlockEntry &cur = E.value;
+
+		const uint32_t storage_flag = (PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_STORAGE);
+		const uint32_t no_storage_flag = (PROPERTY_USAGE_EDITOR);
+
+		p_list->push_back(PropertyInfo(Variant::COLOR, prefix + "color", PROPERTY_HINT_NONE, "",
+				(cur.color != def.color) ? storage_flag : no_storage_flag));
+		p_list->push_back(PropertyInfo(Variant::BOOL, prefix + "solid", PROPERTY_HINT_NONE, "",
+				(cur.solid != def.solid) ? storage_flag : no_storage_flag));
+		p_list->push_back(PropertyInfo(Variant::BOOL, prefix + "transparent", PROPERTY_HINT_NONE, "",
+				(cur.transparent != def.transparent) ? storage_flag : no_storage_flag));
+		p_list->push_back(PropertyInfo(Variant::INT, prefix + "light_opacity", PROPERTY_HINT_RANGE, "0,15,1",
+				(cur.light_opacity != def.light_opacity) ? storage_flag : no_storage_flag));
+		p_list->push_back(PropertyInfo(Variant::INT, prefix + "emission", PROPERTY_HINT_RANGE, "0,15,1",
+				(cur.emission != def.emission) ? storage_flag : no_storage_flag));
+		p_list->push_back(PropertyInfo(Variant::COLOR, prefix + "light_color", PROPERTY_HINT_NONE, "",
+				(cur.light_color != def.light_color) ? storage_flag : no_storage_flag));
 	}
 }
 
@@ -117,6 +220,24 @@ void VoxelBlockRegistry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_block_collision_height", "id", "height"), &VoxelBlockRegistry::set_block_collision_height);
 	ClassDB::bind_method(D_METHOD("get_block_collision_height", "id"), &VoxelBlockRegistry::get_block_collision_height);
 
+	ClassDB::bind_method(D_METHOD("set_block_color", "id", "color"), &VoxelBlockRegistry::set_block_color);
+	ClassDB::bind_method(D_METHOD("get_block_color", "id"), &VoxelBlockRegistry::get_block_color);
+
+	ClassDB::bind_method(D_METHOD("set_block_solid", "id", "solid"), &VoxelBlockRegistry::set_block_solid);
+	ClassDB::bind_method(D_METHOD("get_block_solid", "id"), &VoxelBlockRegistry::get_block_solid);
+
+	ClassDB::bind_method(D_METHOD("set_block_transparent", "id", "transparent"), &VoxelBlockRegistry::set_block_transparent);
+	ClassDB::bind_method(D_METHOD("get_block_transparent", "id"), &VoxelBlockRegistry::get_block_transparent);
+
+	ClassDB::bind_method(D_METHOD("set_block_light_opacity", "id", "opacity"), &VoxelBlockRegistry::set_block_light_opacity);
+	ClassDB::bind_method(D_METHOD("get_block_light_opacity", "id"), &VoxelBlockRegistry::get_block_light_opacity);
+
+	ClassDB::bind_method(D_METHOD("set_block_emission", "id", "emission"), &VoxelBlockRegistry::set_block_emission);
+	ClassDB::bind_method(D_METHOD("get_block_emission", "id"), &VoxelBlockRegistry::get_block_emission);
+
+	ClassDB::bind_method(D_METHOD("set_block_light_color", "id", "color"), &VoxelBlockRegistry::set_block_light_color);
+	ClassDB::bind_method(D_METHOD("get_block_light_color", "id"), &VoxelBlockRegistry::get_block_light_color);
+
 	ClassDB::bind_method(D_METHOD("setup_defaults"), &VoxelBlockRegistry::setup_defaults);
 }
 
@@ -126,7 +247,7 @@ void VoxelBlockRegistry::create_block(int p_id) {
 	if (blocks.has(p_id)) {
 		return;
 	}
-	blocks[p_id] = BlockEntry();
+	blocks[p_id] = _get_engine_default_entry(p_id);
 	emit_changed();
 }
 
@@ -254,12 +375,77 @@ float VoxelBlockRegistry::get_block_collision_height(int p_id) const {
 	return blocks[p_id].collision_height;
 }
 
+void VoxelBlockRegistry::set_block_color(int p_id, const Color &p_color) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].color = p_color;
+	emit_changed();
+}
+
+Color VoxelBlockRegistry::get_block_color(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), Color(1, 1, 1));
+	return blocks[p_id].color;
+}
+
+void VoxelBlockRegistry::set_block_solid(int p_id, bool p_solid) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].solid = p_solid;
+	emit_changed();
+}
+
+bool VoxelBlockRegistry::get_block_solid(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), true);
+	return blocks[p_id].solid;
+}
+
+void VoxelBlockRegistry::set_block_transparent(int p_id, bool p_transparent) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].transparent = p_transparent;
+	emit_changed();
+}
+
+bool VoxelBlockRegistry::get_block_transparent(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), false);
+	return blocks[p_id].transparent;
+}
+
+void VoxelBlockRegistry::set_block_light_opacity(int p_id, int p_opacity) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].light_opacity = (uint8_t)CLAMP(p_opacity, 0, 15);
+	emit_changed();
+}
+
+int VoxelBlockRegistry::get_block_light_opacity(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), 15);
+	return blocks[p_id].light_opacity;
+}
+
+void VoxelBlockRegistry::set_block_emission(int p_id, int p_emission) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].emission = (uint8_t)CLAMP(p_emission, 0, 15);
+	emit_changed();
+}
+
+int VoxelBlockRegistry::get_block_emission(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), 0);
+	return blocks[p_id].emission;
+}
+
+void VoxelBlockRegistry::set_block_light_color(int p_id, const Color &p_color) {
+	ERR_FAIL_COND(!blocks.has(p_id));
+	blocks[p_id].light_color = p_color;
+	emit_changed();
+}
+
+Color VoxelBlockRegistry::get_block_light_color(int p_id) const {
+	ERR_FAIL_COND_V(!blocks.has(p_id), Color(1, 1, 1));
+	return blocks[p_id].light_color;
+}
+
 void VoxelBlockRegistry::setup_defaults() {
-	// Create entries for all engine-defined block types (texture slots empty).
+	// Ensure all built-in block types have entries.
+	// create_block() is a no-op for blocks already loaded from .tres,
+	// and applies per-type defaults for newly created blocks.
 	for (int i = 0; i < VOXEL_BLOCK_TYPE_MAX; i++) {
 		create_block(i);
 	}
-	// Water sits at 87.5% height so shader wave displacement stays below adjacent solid blocks.
-	blocks[VOXEL_BLOCK_WATER].mesh_height = 0.875f;
-	blocks[VOXEL_BLOCK_WATER].collision_height = 0.875f;
 }

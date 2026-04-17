@@ -5,14 +5,15 @@
 #include "scene/resources/material.h"
 #include "scene/resources/texture.h"
 
-// Registry for engine-defined block types: per-face textures and optional ShaderMaterial.
-// Block logic (solid, transparent, color, name) lives in VoxelBlockData.
-// This resource allows assigning textures and shaders to blocks from the editor.
+// Registry for ALL block properties: textures, shaders, physics, and lighting.
+// This is the single source of truth for block definitions.
+// VoxelBlockData serves as a thread-safe cache populated from this registry at world init.
 class VoxelBlockRegistry : public Resource {
 	GDCLASS(VoxelBlockRegistry, Resource);
 
 public:
 	struct BlockEntry {
+		// --- Visual ---
 		Ref<Texture2D> texture_top;
 		Ref<Texture2D> texture_side;
 		Ref<Texture2D> texture_bottom;
@@ -20,10 +21,21 @@ public:
 		// Normalized fractions of block_size (0.0–1.0). 1.0 = full block height.
 		float mesh_height = 1.0f;       // Visual top-surface height.
 		float collision_height = 1.0f;  // Physics AABB height.
+		// --- Physics & identity ---
+		Color color = Color(1, 1, 1);   // Vertex color when no texture.
+		bool solid = true;              // Blocks movement and hides adjacent faces.
+		bool transparent = false;       // Lets light and line-of-sight through.
+		// --- Lighting ---
+		uint8_t light_opacity = 15;     // 0-15; how much light this block absorbs per step.
+		uint8_t emission = 0;           // 0-15; how much block light this block emits.
+		Color light_color = Color(1, 1, 1); // OmniLight3D color when emit > 0.
 	};
 
 private:
 	HashMap<int, BlockEntry> blocks;
+
+	// Returns engine-default BlockEntry for a given built-in block type.
+	static BlockEntry _get_engine_default_entry(int p_id);
 
 protected:
 	bool _set(const StringName &p_name, const Variant &p_value);
@@ -61,6 +73,24 @@ public:
 
 	void set_block_collision_height(int p_id, float p_height);
 	float get_block_collision_height(int p_id) const;
+
+	void set_block_color(int p_id, const Color &p_color);
+	Color get_block_color(int p_id) const;
+
+	void set_block_solid(int p_id, bool p_solid);
+	bool get_block_solid(int p_id) const;
+
+	void set_block_transparent(int p_id, bool p_transparent);
+	bool get_block_transparent(int p_id) const;
+
+	void set_block_light_opacity(int p_id, int p_opacity);
+	int get_block_light_opacity(int p_id) const;
+
+	void set_block_emission(int p_id, int p_emission);
+	int get_block_emission(int p_id) const;
+
+	void set_block_light_color(int p_id, const Color &p_color);
+	Color get_block_light_color(int p_id) const;
 
 	const HashMap<int, BlockEntry> &get_blocks_map() const { return blocks; }
 

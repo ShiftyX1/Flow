@@ -12,6 +12,9 @@ class EditorResourcePicker;
 class ColorRect;
 class Label;
 class Button;
+class CheckBox;
+class SpinBox;
+class ColorPickerButton;
 
 // Popup dialog with the full block texture editor.
 class VoxelBlockRegistryEditorDialog : public AcceptDialog {
@@ -28,6 +31,13 @@ class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 		EditorResourcePicker *picker_side = nullptr;
 		EditorResourcePicker *picker_bottom = nullptr;
 		EditorResourcePicker *picker_shader = nullptr;
+		// Physics & lighting controls.
+		CheckBox *check_solid = nullptr;
+		CheckBox *check_transparent = nullptr;
+		ColorPickerButton *picker_color = nullptr;
+		SpinBox *spin_opacity = nullptr;
+		SpinBox *spin_emission = nullptr;
+		ColorPickerButton *picker_light_color = nullptr;
 	};
 
 	Vector<BlockRow> block_rows;
@@ -35,6 +45,12 @@ class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 	void _rebuild_block_list();
 	void _texture_changed(const Ref<Resource> &p_resource, int p_block_id, int p_face);
 	void _shader_changed(const Ref<Resource> &p_resource, int p_block_id);
+	void _solid_toggled(bool p_pressed, int p_block_id);
+	void _transparent_toggled(bool p_pressed, int p_block_id);
+	void _color_changed(const Color &p_color, int p_block_id);
+	void _light_opacity_changed(double p_value, int p_block_id);
+	void _emission_changed(double p_value, int p_block_id);
+	void _light_color_changed(const Color &p_color, int p_block_id);
 
 public:
 	void set_registry(const Ref<VoxelBlockRegistry> &p_registry);

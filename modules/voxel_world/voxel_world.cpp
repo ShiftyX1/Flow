@@ -630,17 +630,13 @@ void vertex() {
 void fragment() {
 	vec4 base = use_texture ? texture(texture_albedo, UV) : vec4(1.0);
 	ALBEDO = base.rgb * COLOR.rgb;
-	// Voxel light modulation.
+	// Sunlight modulation + AO. Block light is handled by OmniLight3D nodes.
 	float sun = voxel_light.r * sun_intensity;
-	float block = voxel_light.g;
 	float ao = voxel_light.b;
-	float combined = max(sun, block);
-	float brightness = combined * ao;
-	// Minimum ambient so things are never pitch black.
+	float brightness = sun * ao;
+	// Minimum ambient so caves are never pitch black.
 	brightness = max(brightness, 0.03);
 	ALBEDO *= brightness;
-	// Block light adds emissive glow (warm color).
-	EMISSION = vec3(0.95, 0.7, 0.4) * block * ao * 0.5;
 	if (use_texture) {
 		ALPHA = base.a * COLOR.a;
 		ALPHA_SCISSOR_THRESHOLD = 0.5;
@@ -691,6 +687,15 @@ void VoxelWorld::_cleanup_world() {
 		_unload_chunk(keys[i].x, keys[i].y);
 	}
 	loaded_chunks.clear();
+
+	// Safety: remove any block lights not already freed by _unload_chunk.
+	for (const KeyValue<Vector3i, OmniLight3D *> &E : block_lights) {
+		if (E.value->get_parent() == this) {
+			remove_child(E.value);
+		}
+		memdelete(E.value);
+	}
+	block_lights.clear();
 
 	if (generator) {
 		memdelete(generator);
@@ -802,7 +807,7 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	if (data->neighbor_light_pz.size() > 0) { light_nb.light_pz = data->neighbor_light_pz.ptr(); }
 	if (data->neighbor_light_nz.size() > 0) { light_nb.light_nz = data->neighbor_light_nz.ptr(); }
 
-	VoxelLightMap::propagate_all(result.light_data.ptrw(), result.blocks.ptr(), light_nb);
+	VoxelLightMap::propagate_sunlight(result.light_data.ptrw(), result.blocks.ptr(), light_nb);
 
 	// Build NeighborBlocks from snapshots captured on the main thread at queue time.
 	VoxelMesher::NeighborBlocks nb;
@@ -937,6 +942,56 @@ void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<Voxe
 	mi->set_owner(nullptr);
 }
 
+// ---- Block light (OmniLight3D) management ----
+
+void VoxelWorld::_spawn_block_light(const Vector3i &p_block_pos, VoxelBlockType p_type) {
+	if (block_lights.has(p_block_pos)) {
+		return; // Already spawned.
+	}
+	uint8_t emission = VoxelBlockData::get_block_emission(p_type);
+	if (emission == 0) {
+		return;
+	}
+	OmniLight3D *light = memnew(OmniLight3D);
+	light->set_param(Light3D::PARAM_RANGE, (float)emission * block_size);
+	light->set_param(Light3D::PARAM_ENERGY, 10.0f);
+	light->set_color(VoxelBlockData::get_block_light_color(p_type));
+	light->set_position(block_to_world_pos(p_block_pos));
+	light->set_shadow(true);
+	add_child(light);
+	block_lights[p_block_pos] = light;
+}
+
+void VoxelWorld::_remove_block_light(const Vector3i &p_block_pos) {
+	OmniLight3D **lptr = block_lights.getptr(p_block_pos);
+	if (!lptr) {
+		return;
+	}
+	OmniLight3D *light = *lptr;
+	if (light->get_parent() == this) {
+		remove_child(light);
+	}
+	memdelete(light);
+	block_lights.erase(p_block_pos);
+}
+
+void VoxelWorld::_scan_chunk_for_lights(VoxelChunk *p_chunk) {
+	const Vector<uint8_t> &blocks = p_chunk->get_blocks();
+	Vector2i cpos = p_chunk->get_chunk_pos();
+	int base_bx = cpos.x * VoxelChunk::SIZE_X;
+	int base_bz = cpos.y * VoxelChunk::SIZE_Z;
+	for (int y = 0; y < VoxelChunk::SIZE_Y; y++) {
+		for (int z = 0; z < VoxelChunk::SIZE_Z; z++) {
+			for (int x = 0; x < VoxelChunk::SIZE_X; x++) {
+				VoxelBlockType type = (VoxelBlockType)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+				if (VoxelBlockData::get_block_emission(type) > 0) {
+					_spawn_block_light(Vector3i(base_bx + x, y, base_bz + z), type);
+				}
+			}
+		}
+	}
+}
+
 // Rebuild a chunk mesh synchronously on the main thread (used in set_block_at for immediate feedback).
 void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 	Vector2i cpos = p_chunk->get_chunk_pos();
@@ -972,7 +1027,7 @@ void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 	light_nb.light_pz = snap_light(0, 1);
 	light_nb.light_nz = snap_light(0, -1);
 
-	VoxelLightMap::propagate_all(p_chunk->get_light_data_rw().ptrw(), p_chunk->get_blocks().ptr(), light_nb);
+	VoxelLightMap::propagate_sunlight(p_chunk->get_light_data_rw().ptrw(), p_chunk->get_blocks().ptr(), light_nb);
 
 	VoxelMesher::NeighborLight mesh_nl;
 	mesh_nl.px = snap_light(1, 0);
@@ -1085,6 +1140,7 @@ void VoxelWorld::_integrate_finished_chunks() {
 		// Register the chunk and apply the pre-built surfaces (built off-thread).
 		loaded_chunks[result.key] = chunk;
 		_apply_surfaces_to_chunk(chunk, result.surfaces);
+		_scan_chunk_for_lights(chunk);
 
 		// Spawn chunk border visualizer when enabled.
 		if (show_chunk_borders) {
@@ -1149,6 +1205,21 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 	if (mi && mi->get_parent() == this) {
 		remove_child(mi);
 		memdelete(mi);
+	}
+
+	// Remove OmniLight3D nodes for emissive blocks in this chunk.
+	{
+		const Vector<uint8_t> &blocks = chunk->get_blocks();
+		for (int y = 0; y < VoxelChunk::SIZE_Y; y++) {
+			for (int z = 0; z < VoxelChunk::SIZE_Z; z++) {
+				for (int x = 0; x < VoxelChunk::SIZE_X; x++) {
+					VoxelBlockType type = (VoxelBlockType)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+					if (VoxelBlockData::get_block_emission(type) > 0) {
+						_remove_block_light(Vector3i(p_cx * VoxelChunk::SIZE_X + x, y, p_cz * VoxelChunk::SIZE_Z + z));
+					}
+				}
+			}
+		}
 	}
 
 	// Remove chunk border visualizer if enabled.
@@ -1217,6 +1288,20 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 
 	int old_id = (int)chunk->get_block(local.x, local.y, local.z);
 	chunk->set_block(local.x, local.y, local.z, (VoxelBlockType)p_block_id);
+
+	// Manage OmniLight3D for emissive blocks (e.g. torches).
+	{
+		Vector3i light_pos(
+				chunk_key.x * VoxelChunk::SIZE_X + local.x,
+				local.y,
+				chunk_key.y * VoxelChunk::SIZE_Z + local.z);
+		if (VoxelBlockData::get_block_emission((VoxelBlockType)old_id) > 0) {
+			_remove_block_light(light_pos);
+		}
+		if (VoxelBlockData::get_block_emission((VoxelBlockType)p_block_id) > 0) {
+			_spawn_block_light(light_pos, (VoxelBlockType)p_block_id);
+		}
+	}
 
 	// Rebuild this chunk synchronously for immediate visual feedback.
 	_rebuild_chunk_mesh(chunk);

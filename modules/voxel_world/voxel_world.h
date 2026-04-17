@@ -121,6 +121,13 @@ private:
 	// Build mesh on main thread (used only for immediate response in set_block_at).
 	void _rebuild_chunk_mesh(VoxelChunk *p_chunk);
 
+	// Block-emitting light nodes (OmniLight3D per emissive block in loaded chunks).
+	HashMap<Vector3i, OmniLight3D *> block_lights;
+	void _spawn_block_light(const Vector3i &p_block_pos, VoxelBlockType p_type);
+	void _remove_block_light(const Vector3i &p_block_pos);
+	void _scan_chunk_for_lights(VoxelChunk *p_chunk);
+
+	// Background chunk generation
 	void _initialize_world();
 	void _cleanup_world();
 	void _update_chunks(const Vector3 &p_camera_pos);

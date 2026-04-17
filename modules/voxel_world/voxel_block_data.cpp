@@ -42,6 +42,20 @@ const uint8_t VoxelBlockData::block_emission[VOXEL_BLOCK_TYPE_MAX] = {
 	14, // TORCH
 };
 
+const Color VoxelBlockData::block_light_color[VOXEL_BLOCK_TYPE_MAX] = {
+	Color(1, 1, 1),            // AIR (unused)
+	Color(1, 1, 1),            // GRASS
+	Color(1, 1, 1),            // DIRT
+	Color(1, 1, 1),            // STONE
+	Color(1, 1, 1),            // SAND
+	Color(1, 1, 1),            // WATER
+	Color(1, 1, 1),            // SNOW
+	Color(1, 1, 1),            // WOOD
+	Color(1, 1, 1),            // LEAVES
+	Color(1, 1, 1),            // BEDROCK
+	Color(1.0f, 0.6f, 0.2f),   // TORCH (warm orange)
+};
+
 const uint8_t VoxelBlockData::block_light_opacity[VOXEL_BLOCK_TYPE_MAX] = {
 	0,  // AIR (fully transparent to light)
 	15, // GRASS (fully opaque)

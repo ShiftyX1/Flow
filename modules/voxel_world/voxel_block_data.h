@@ -24,6 +24,7 @@ public:
 	static const char *block_names[VOXEL_BLOCK_TYPE_MAX];
 	static const uint8_t block_emission[VOXEL_BLOCK_TYPE_MAX];
 	static const uint8_t block_light_opacity[VOXEL_BLOCK_TYPE_MAX];
+	static const Color block_light_color[VOXEL_BLOCK_TYPE_MAX]; // OmniLight3D color for emissive blocks.
 
 	static _FORCE_INLINE_ bool is_solid(VoxelBlockType p_type) {
 		return p_type != VOXEL_BLOCK_AIR && p_type != VOXEL_BLOCK_WATER && p_type != VOXEL_BLOCK_TORCH;
@@ -52,5 +53,12 @@ public:
 			return block_light_opacity[p_type];
 		}
 		return 1;
+	}
+
+	static _FORCE_INLINE_ Color get_block_light_color(VoxelBlockType p_type) {
+		if (p_type < VOXEL_BLOCK_TYPE_MAX) {
+			return block_light_color[p_type];
+		}
+		return Color(1, 1, 1);
 	}
 };

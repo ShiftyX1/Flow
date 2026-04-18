@@ -34,10 +34,11 @@ public:
 
 	// Pointers to neighbor chunk light data arrays.
 	struct NeighborLight {
-		const uint8_t *px = nullptr;
-		const uint8_t *nx = nullptr;
-		const uint8_t *pz = nullptr;
-		const uint8_t *nz = nullptr;
+		const uint8_t *px;
+		const uint8_t *nx;
+		const uint8_t *pz;
+		const uint8_t *nz;
+		NeighborLight() : px(nullptr), nx(nullptr), pz(nullptr), nz(nullptr) {}
 	};
 
 	// Build multiple mesh surfaces: one per unique texture + one for untextured faces.

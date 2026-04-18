@@ -211,6 +211,32 @@ bool VoxelBlockRegistry::_set(const StringName &p_name, const Variant &p_value) 
 		set_block_emission(idx, (int)p_value);
 	} else if (what == "light_color") {
 		set_block_light_color(idx, p_value);
+	} else if (what == "breakable") {
+		set_block_breakable(idx, p_value);
+	} else if (what == "requires_tool") {
+		set_block_requires_tool(idx, p_value);
+	} else if (what == "hand_break_time") {
+		set_block_hand_break_time(idx, p_value);
+	} else if (what == "tool_entry_count") {
+		// Resize tool_entries vector to match serialised count.
+		int count = (int)p_value;
+		blocks.write[idx].tool_entries.resize(count);
+	} else if (what == "tool_entry") {
+		// Path: block/{id}/tool_entry/{j}/{field}
+		int j = prop_name.get_slicec('/', 3).to_int();
+		String field = prop_name.get_slicec('/', 4);
+		if (j < 0 || j >= blocks[idx].tool_entries.size()) {
+			return false;
+		}
+		if (field == "tool_type") {
+			blocks.write[idx].tool_entries.write[j].tool_type = StringName(String(p_value));
+		} else if (field == "min_tier") {
+			blocks.write[idx].tool_entries.write[j].min_tier = (int)p_value;
+		} else if (field == "break_time") {
+			blocks.write[idx].tool_entries.write[j].break_time = (float)p_value;
+		} else {
+			return false;
+		}
 	} else {
 		return false;
 	}
@@ -256,6 +282,31 @@ bool VoxelBlockRegistry::_get(const StringName &p_name, Variant &r_ret) const {
 		r_ret = get_block_emission(idx);
 	} else if (what == "light_color") {
 		r_ret = get_block_light_color(idx);
+	} else if (what == "breakable") {
+		r_ret = get_block_breakable(idx);
+	} else if (what == "requires_tool") {
+		r_ret = get_block_requires_tool(idx);
+	} else if (what == "hand_break_time") {
+		r_ret = get_block_hand_break_time(idx);
+	} else if (what == "tool_entry_count") {
+		r_ret = get_block_tool_entry_count(idx);
+	} else if (what == "tool_entry") {
+		// Path: block/{id}/tool_entry/{j}/{field}
+		int j = prop_name.get_slicec('/', 3).to_int();
+		String field = prop_name.get_slicec('/', 4);
+		if (j < 0 || j >= blocks[idx].tool_entries.size()) {
+			return false;
+		}
+		const BlockToolEntry &te = blocks[idx].tool_entries[j];
+		if (field == "tool_type") {
+			r_ret = String(te.tool_type);
+		} else if (field == "min_tier") {
+			r_ret = te.min_tier;
+		} else if (field == "break_time") {
+			r_ret = te.break_time;
+		} else {
+			return false;
+		}
 	} else {
 		return false;
 	}
@@ -285,6 +336,18 @@ void VoxelBlockRegistry::_get_property_list(List<PropertyInfo> *p_list) const {
 		p_list->push_back(PropertyInfo(Variant::INT, prefix + "light_opacity", PROPERTY_HINT_RANGE, "0,15,1"));
 		p_list->push_back(PropertyInfo(Variant::INT, prefix + "emission", PROPERTY_HINT_RANGE, "0,15,1"));
 		p_list->push_back(PropertyInfo(Variant::COLOR, prefix + "light_color"));
+		// Mining / survival
+		p_list->push_back(PropertyInfo(Variant::BOOL, prefix + "breakable"));
+		p_list->push_back(PropertyInfo(Variant::BOOL, prefix + "requires_tool"));
+		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "hand_break_time", PROPERTY_HINT_RANGE, "0.0,300.0,0.1"));
+		p_list->push_back(PropertyInfo(Variant::INT, prefix + "tool_entry_count", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR));
+		const Vector<BlockToolEntry> &entries = blocks[i].tool_entries;
+		for (int j = 0; j < entries.size(); j++) {
+			String ep = vformat("block/%d/tool_entry/%d/", i, j);
+			p_list->push_back(PropertyInfo(Variant::STRING, ep + "tool_type", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR));
+			p_list->push_back(PropertyInfo(Variant::INT, ep + "min_tier", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR));
+			p_list->push_back(PropertyInfo(Variant::FLOAT, ep + "break_time", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR));
+		}
 	}
 }
 
@@ -340,6 +403,18 @@ void VoxelBlockRegistry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_block_light_color", "id"), &VoxelBlockRegistry::get_block_light_color);
 
 	ClassDB::bind_method(D_METHOD("set_block_name", "id", "name"), &VoxelBlockRegistry::set_block_name);
+
+	ClassDB::bind_method(D_METHOD("set_block_breakable", "id", "breakable"), &VoxelBlockRegistry::set_block_breakable);
+	ClassDB::bind_method(D_METHOD("get_block_breakable", "id"), &VoxelBlockRegistry::get_block_breakable);
+	ClassDB::bind_method(D_METHOD("set_block_requires_tool", "id", "requires_tool"), &VoxelBlockRegistry::set_block_requires_tool);
+	ClassDB::bind_method(D_METHOD("get_block_requires_tool", "id"), &VoxelBlockRegistry::get_block_requires_tool);
+	ClassDB::bind_method(D_METHOD("set_block_hand_break_time", "id", "time"), &VoxelBlockRegistry::set_block_hand_break_time);
+	ClassDB::bind_method(D_METHOD("get_block_hand_break_time", "id"), &VoxelBlockRegistry::get_block_hand_break_time);
+	ClassDB::bind_method(D_METHOD("add_block_tool_entry", "id", "tool_type", "min_tier", "break_time"), &VoxelBlockRegistry::add_block_tool_entry);
+	ClassDB::bind_method(D_METHOD("remove_block_tool_entry", "id", "entry_idx"), &VoxelBlockRegistry::remove_block_tool_entry);
+	ClassDB::bind_method(D_METHOD("get_block_tool_entry_count", "id"), &VoxelBlockRegistry::get_block_tool_entry_count);
+	ClassDB::bind_method(D_METHOD("get_block_tool_entries", "id"), &VoxelBlockRegistry::get_block_tool_entries);
+	ClassDB::bind_method(D_METHOD("get_block_break_time_for_tool", "id", "tool_type", "tool_tier"), &VoxelBlockRegistry::get_block_break_time_for_tool);
 
 	ClassDB::bind_method(D_METHOD("setup_defaults"), &VoxelBlockRegistry::setup_defaults);
 }
@@ -676,4 +751,110 @@ void VoxelBlockRegistry::setup_defaults() {
 	d["emission"] = 14;
 	d["light_color"] = Color(1.0f, 0.6f, 0.2f);
 	reg("torch", 10, d);
+}
+
+// --- Mining / survival implementations ---
+
+void VoxelBlockRegistry::set_block_breakable(int p_id, bool p_breakable) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].breakable = p_breakable;
+	emit_changed();
+}
+bool VoxelBlockRegistry::get_block_breakable(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, false);
+	return blocks[p_id].breakable;
+}
+
+void VoxelBlockRegistry::set_block_requires_tool(int p_id, bool p_requires_tool) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].requires_tool = p_requires_tool;
+	emit_changed();
+}
+bool VoxelBlockRegistry::get_block_requires_tool(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, false);
+	return blocks[p_id].requires_tool;
+}
+
+void VoxelBlockRegistry::set_block_hand_break_time(int p_id, float p_time) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].hand_break_time = MAX(p_time, 0.0f);
+	emit_changed();
+}
+float VoxelBlockRegistry::get_block_hand_break_time(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, 5.0f);
+	return blocks[p_id].hand_break_time;
+}
+
+int VoxelBlockRegistry::add_block_tool_entry(int p_id, const StringName &p_tool_type, int p_min_tier, float p_break_time) {
+	REGISTRY_ENSURE_BLOCK_V(p_id, -1);
+	BlockToolEntry entry;
+	entry.tool_type = p_tool_type;
+	entry.min_tier = MAX(p_min_tier, 0);
+	entry.break_time = MAX(p_break_time, 0.0f);
+	blocks.write[p_id].tool_entries.push_back(entry);
+	emit_changed();
+	return blocks[p_id].tool_entries.size() - 1;
+}
+
+void VoxelBlockRegistry::remove_block_tool_entry(int p_id, int p_entry_idx) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	ERR_FAIL_INDEX(p_entry_idx, blocks[p_id].tool_entries.size());
+	blocks.write[p_id].tool_entries.remove_at(p_entry_idx);
+	emit_changed();
+}
+
+int VoxelBlockRegistry::get_block_tool_entry_count(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, 0);
+	return blocks[p_id].tool_entries.size();
+}
+
+Array VoxelBlockRegistry::get_block_tool_entries(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, Array());
+	Array result;
+	for (const BlockToolEntry &te : blocks[p_id].tool_entries) {
+		Dictionary d;
+		d["tool_type"] = String(te.tool_type);
+		d["min_tier"] = te.min_tier;
+		d["break_time"] = te.break_time;
+		result.push_back(d);
+	}
+	return result;
+}
+
+float VoxelBlockRegistry::get_block_break_time_for_tool(int p_id, const StringName &p_tool_type, int p_tool_tier) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, VOXEL_BREAK_IMPOSSIBLE);
+	const BlockEntry &entry = blocks[p_id];
+
+	if (!entry.breakable) {
+		return VOXEL_BREAK_IMPOSSIBLE;
+	}
+
+	// Find the best matching tool entry: type matches (or wildcard) AND min_tier <= tool_tier.
+	// Among all matches pick the one with the highest min_tier (most specific).
+	int best_tier = -1;
+	float best_time = VOXEL_BREAK_IMPOSSIBLE;
+
+	for (const BlockToolEntry &te : entry.tool_entries) {
+		bool type_match = te.tool_type.is_empty() || te.tool_type == p_tool_type;
+		if (!type_match) {
+			continue;
+		}
+		if (te.min_tier > p_tool_tier) {
+			continue; // Tool tier too low for this entry.
+		}
+		if (te.min_tier > best_tier) {
+			best_tier = te.min_tier;
+			best_time = te.break_time;
+		}
+	}
+
+	if (best_tier >= 0) {
+		return best_time;
+	}
+
+	// No matching tool entry.
+	if (entry.requires_tool) {
+		return VOXEL_BREAK_IMPOSSIBLE;
+	}
+	return entry.hand_break_time;
 }

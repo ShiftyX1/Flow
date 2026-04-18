@@ -4,6 +4,7 @@
 #include "editor/plugins/editor_plugin.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/dialogs.h"
+#include "scene/gui/line_edit.h"
 #include "scene/gui/scroll_container.h"
 
 #include "../voxel_block_registry.h"
@@ -38,6 +39,10 @@ class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 		SpinBox *spin_opacity = nullptr;
 		SpinBox *spin_emission = nullptr;
 		ColorPickerButton *picker_light_color = nullptr;
+		// Mining / survival controls.
+		CheckBox *check_breakable = nullptr;
+		CheckBox *check_requires_tool = nullptr;
+		SpinBox *spin_hand_break_time = nullptr;
 	};
 
 	Vector<BlockRow> block_rows;
@@ -51,6 +56,15 @@ class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 	void _light_opacity_changed(double p_value, int p_block_id);
 	void _emission_changed(double p_value, int p_block_id);
 	void _light_color_changed(const Color &p_color, int p_block_id);
+	// Mining callbacks.
+	void _breakable_toggled(bool p_pressed, int p_block_id);
+	void _requires_tool_toggled(bool p_pressed, int p_block_id);
+	void _hand_break_time_changed(double p_value, int p_block_id);
+	void _tool_entry_add_pressed(int p_block_id);
+	void _tool_entry_remove_pressed(int p_block_id, int p_entry_idx);
+	void _tool_entry_type_submitted(const String &p_text, int p_block_id, int p_entry_idx);
+	void _tool_entry_tier_changed(double p_value, int p_block_id, int p_entry_idx);
+	void _tool_entry_time_changed(double p_value, int p_block_id, int p_entry_idx);
 
 public:
 	void set_registry(const Ref<VoxelBlockRegistry> &p_registry);

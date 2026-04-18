@@ -12,6 +12,7 @@
 #include "scene/gui/color_picker.h"
 #include "scene/gui/color_rect.h"
 #include "scene/gui/label.h"
+#include "scene/gui/line_edit.h"
 #include "scene/gui/margin_container.h"
 #include "scene/gui/separator.h"
 #include "scene/gui/spin_box.h"
@@ -156,6 +157,124 @@ void VoxelBlockRegistryEditorDialog::_light_color_changed(const Color &p_color, 
 	undo_redo->create_action("Set Block Light Color", UndoRedo::MERGE_ENDS);
 	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/light_color", p_block_id), p_color);
 	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/light_color", p_block_id), registry->get_block_light_color(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_breakable_toggled(bool p_pressed, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Breakable");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/breakable", p_block_id), p_pressed);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/breakable", p_block_id), registry->get_block_breakable(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_requires_tool_toggled(bool p_pressed, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Requires Tool");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/requires_tool", p_block_id), p_pressed);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/requires_tool", p_block_id), registry->get_block_requires_tool(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_hand_break_time_changed(double p_value, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Hand Break Time", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/hand_break_time", p_block_id), (float)p_value);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/hand_break_time", p_block_id), registry->get_block_hand_break_time(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_tool_entry_add_pressed(int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+	int new_idx = registry->get_block_tool_entry_count(p_block_id);
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Add Tool Entry");
+	undo_redo->add_do_method(registry.ptr(), "add_block_tool_entry", p_block_id, StringName(""), 0, 1.0f);
+	undo_redo->add_undo_method(registry.ptr(), "remove_block_tool_entry", p_block_id, new_idx);
+	undo_redo->commit_action();
+	callable_mp(this, &VoxelBlockRegistryEditorDialog::_rebuild_block_list).call_deferred();
+}
+
+void VoxelBlockRegistryEditorDialog::_tool_entry_remove_pressed(int p_block_id, int p_entry_idx) {
+	if (registry.is_null()) {
+		return;
+	}
+	Array entries = registry->get_block_tool_entries(p_block_id);
+	if (p_entry_idx < 0 || p_entry_idx >= (int)entries.size()) {
+		return;
+	}
+	Dictionary entry_data = entries[p_entry_idx];
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Remove Tool Entry");
+	undo_redo->add_do_method(registry.ptr(), "remove_block_tool_entry", p_block_id, p_entry_idx);
+	undo_redo->add_undo_method(registry.ptr(), "add_block_tool_entry", p_block_id,
+			StringName(String(entry_data["tool_type"])), (int)entry_data["min_tier"], (float)entry_data["break_time"]);
+	undo_redo->commit_action();
+	callable_mp(this, &VoxelBlockRegistryEditorDialog::_rebuild_block_list).call_deferred();
+}
+
+void VoxelBlockRegistryEditorDialog::_tool_entry_type_submitted(const String &p_text, int p_block_id, int p_entry_idx) {
+	if (registry.is_null()) {
+		return;
+	}
+	Array entries = registry->get_block_tool_entries(p_block_id);
+	if (p_entry_idx < 0 || p_entry_idx >= (int)entries.size()) {
+		return;
+	}
+	Dictionary entry_dict = entries[p_entry_idx];
+	String old_type = entry_dict["tool_type"];
+	if (old_type == p_text) {
+		return;
+	}
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Tool Entry Type");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/tool_entry/%d/tool_type", p_block_id, p_entry_idx), p_text);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/tool_entry/%d/tool_type", p_block_id, p_entry_idx), old_type);
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_tool_entry_tier_changed(double p_value, int p_block_id, int p_entry_idx) {
+	if (registry.is_null()) {
+		return;
+	}
+	Array entries = registry->get_block_tool_entries(p_block_id);
+	if (p_entry_idx < 0 || p_entry_idx >= (int)entries.size()) {
+		return;
+	}
+	Dictionary entry_dict = entries[p_entry_idx];
+	int old_tier = entry_dict["min_tier"];
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Tool Entry Min Tier", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/tool_entry/%d/min_tier", p_block_id, p_entry_idx), (int)p_value);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/tool_entry/%d/min_tier", p_block_id, p_entry_idx), old_tier);
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_tool_entry_time_changed(double p_value, int p_block_id, int p_entry_idx) {
+	if (registry.is_null()) {
+		return;
+	}
+	Array entries = registry->get_block_tool_entries(p_block_id);
+	if (p_entry_idx < 0 || p_entry_idx >= (int)entries.size()) {
+		return;
+	}
+	Dictionary entry_dict = entries[p_entry_idx];
+	float old_time = entry_dict["break_time"];
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Tool Entry Break Time", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/tool_entry/%d/break_time", p_block_id, p_entry_idx), (float)p_value);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/tool_entry/%d/break_time", p_block_id, p_entry_idx), old_time);
 	undo_redo->commit_action();
 }
 
@@ -381,6 +500,154 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 			cpb->connect("color_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_light_color_changed).bind(block_id));
 			slot->add_child(cpb);
 			row.picker_light_color = cpb;
+		}
+
+		// --- Mining / survival section ---
+		HBoxContainer *mining_row = memnew(HBoxContainer);
+		mining_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(mining_row);
+
+		// Breakable
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			mining_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Breakable");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			CheckBox *cb = memnew(CheckBox);
+			cb->set_pressed(registry->has_block(block_id) ? registry->get_block_breakable(block_id) : true);
+			cb->connect("toggled", callable_mp(this, &VoxelBlockRegistryEditorDialog::_breakable_toggled).bind(block_id));
+			slot->add_child(cb);
+			row.check_breakable = cb;
+		}
+
+		// Requires Tool
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			mining_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Req. Tool");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			CheckBox *cb = memnew(CheckBox);
+			cb->set_pressed(registry->has_block(block_id) ? registry->get_block_requires_tool(block_id) : false);
+			cb->connect("toggled", callable_mp(this, &VoxelBlockRegistryEditorDialog::_requires_tool_toggled).bind(block_id));
+			slot->add_child(cb);
+			row.check_requires_tool = cb;
+		}
+
+		// Hand Break Time
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			mining_row->add_child(slot);
+			Label *lbl = memnew(Label);
+			lbl->set_text("Hand Break (s)");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+			SpinBox *sp = memnew(SpinBox);
+			sp->set_min(0.0);
+			sp->set_max(300.0);
+			sp->set_step(0.1);
+			sp->set_value(registry->has_block(block_id) ? registry->get_block_hand_break_time(block_id) : 5.0);
+			sp->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_hand_break_time_changed).bind(block_id));
+			slot->add_child(sp);
+			row.spin_hand_break_time = sp;
+		}
+
+		// --- Tool Entries section ---
+		HBoxContainer *entries_header_row = memnew(HBoxContainer);
+		entries_header_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(entries_header_row);
+
+		{
+			Label *lbl = memnew(Label);
+			lbl->set_text("Tool Entries:");
+			lbl->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			entries_header_row->add_child(lbl);
+
+			Button *add_btn = memnew(Button);
+			add_btn->set_text("+");
+			add_btn->set_tooltip_text("Add tool entry");
+			add_btn->connect(SceneStringName(pressed), callable_mp(this, &VoxelBlockRegistryEditorDialog::_tool_entry_add_pressed).bind(block_id));
+			entries_header_row->add_child(add_btn);
+		}
+
+		int entry_count = registry->get_block_tool_entry_count(block_id);
+		Array cur_entries = registry->get_block_tool_entries(block_id);
+		for (int j = 0; j < entry_count; j++) {
+			Dictionary entry_dict = cur_entries[j];
+
+			HBoxContainer *entry_row = memnew(HBoxContainer);
+			entry_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			block_list_vbox->add_child(entry_row);
+
+			// Tool type — LineEdit (press Enter to confirm)
+			{
+				VBoxContainer *slot = memnew(VBoxContainer);
+				slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+				entry_row->add_child(slot);
+				Label *lbl = memnew(Label);
+				lbl->set_text("Tool Type");
+				lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+				slot->add_child(lbl);
+				LineEdit *le = memnew(LineEdit);
+				le->set_text(entry_dict["tool_type"]);
+				le->set_placeholder("e.g. pickaxe");
+				le->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+				le->connect("text_submitted", callable_mp(this, &VoxelBlockRegistryEditorDialog::_tool_entry_type_submitted).bind(block_id, j));
+				slot->add_child(le);
+			}
+
+			// Min tier
+			{
+				VBoxContainer *slot = memnew(VBoxContainer);
+				entry_row->add_child(slot);
+				Label *lbl = memnew(Label);
+				lbl->set_text("Min Tier");
+				lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+				slot->add_child(lbl);
+				SpinBox *sp = memnew(SpinBox);
+				sp->set_min(0);
+				sp->set_max(100);
+				sp->set_step(1);
+				sp->set_value((int)entry_dict["min_tier"]);
+				sp->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_tool_entry_tier_changed).bind(block_id, j));
+				slot->add_child(sp);
+			}
+
+			// Break time
+			{
+				VBoxContainer *slot = memnew(VBoxContainer);
+				slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+				entry_row->add_child(slot);
+				Label *lbl = memnew(Label);
+				lbl->set_text("Break Time (s)");
+				lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+				slot->add_child(lbl);
+				SpinBox *sp = memnew(SpinBox);
+				sp->set_min(0.0);
+				sp->set_max(300.0);
+				sp->set_step(0.1);
+				sp->set_value((float)entry_dict["break_time"]);
+				sp->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_tool_entry_time_changed).bind(block_id, j));
+				slot->add_child(sp);
+			}
+
+			// Remove button
+			{
+				VBoxContainer *slot = memnew(VBoxContainer);
+				entry_row->add_child(slot);
+				Label *spacer = memnew(Label);
+				spacer->set_text(" ");
+				slot->add_child(spacer);
+				Button *rm_btn = memnew(Button);
+				rm_btn->set_text("X");
+				rm_btn->set_tooltip_text("Remove this entry");
+				rm_btn->connect(SceneStringName(pressed), callable_mp(this, &VoxelBlockRegistryEditorDialog::_tool_entry_remove_pressed).bind(block_id, j));
+				slot->add_child(rm_btn);
+			}
 		}
 
 		block_rows.push_back(row);

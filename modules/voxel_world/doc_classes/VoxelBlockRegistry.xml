@@ -122,5 +122,104 @@
 				Returns [code]true[/code] if the block has a [ShaderMaterial] assigned.
 			</description>
 		</method>
+		<method name="set_block_breakable">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="breakable" type="bool" />
+			<description>
+				Sets whether the block can ever be destroyed. When [code]false[/code] the block is indestructible (e.g. bedrock) and [method get_block_break_time_for_tool] always returns [code]-1.0[/code].
+			</description>
+		</method>
+		<method name="get_block_breakable" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if the block can be destroyed.
+			</description>
+		</method>
+		<method name="set_block_requires_tool">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="requires_tool" type="bool" />
+			<description>
+				Sets whether the block requires a matching tool entry to be broken. When [code]true[/code] and no tool entry matches, [method get_block_break_time_for_tool] returns [code]-1.0[/code] (cannot be broken by hand or with a mismatched tool). When [code]false[/code] and no matching tool entry exists, the block can still be broken by hand in [method get_block_hand_break_time] seconds.
+			</description>
+		</method>
+		<method name="get_block_requires_tool" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if a matching tool is required to break the block.
+			</description>
+		</method>
+		<method name="set_block_hand_break_time">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="time" type="float" />
+			<description>
+				Sets the base break time in seconds when no matching tool entry is found and [method get_block_requires_tool] is [code]false[/code]. This is the time it takes to break the block by hand or with a wrong tool type.
+			</description>
+		</method>
+		<method name="get_block_hand_break_time" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the block's hand break time in seconds.
+			</description>
+		</method>
+		<method name="add_block_tool_entry">
+			<return type="int" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="tool_type" type="StringName" />
+			<param index="2" name="min_tier" type="int" />
+			<param index="3" name="break_time" type="float" />
+			<description>
+				Adds a tool entry for the block defining how long it takes to break with a specific tool type and tier. [param tool_type] is a soft string reference (e.g. [code]"pickaxe"[/code], [code]"shovel"[/code]); pass an empty [StringName] to match any tool type. [param min_tier] is the minimum integer tool tier required for this entry to apply. [param break_time] is the duration in seconds. Returns the index of the new entry.
+				Multiple entries for the same tool type with different [param min_tier] values form a tier table: the entry with the highest [param min_tier] that is still [code]<=[/code] the player's tool tier is used.
+			</description>
+		</method>
+		<method name="remove_block_tool_entry">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="entry_idx" type="int" />
+			<description>
+				Removes the tool entry at [param entry_idx] from the block's tool entry list.
+			</description>
+		</method>
+		<method name="get_block_tool_entry_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the number of tool entries registered for the block.
+			</description>
+		</method>
+		<method name="get_block_tool_entries" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns all tool entries for the block as an [Array] of [Dictionary] values. Each dictionary has the keys [code]"tool_type"[/code] ([String]), [code]"min_tier"[/code] ([int]), and [code]"break_time"[/code] ([float]).
+			</description>
+		</method>
+		<method name="get_block_break_time_for_tool" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="tool_type" type="StringName" />
+			<param index="2" name="tool_tier" type="int" />
+			<description>
+				Returns the break time in seconds for the given tool type and tier, or [code]-1.0[/code] if the block cannot be broken with that combination.
+				Matching rules:
+				1. If the block is not breakable ([method get_block_breakable] is [code]false[/code]), always returns [code]-1.0[/code].
+				2. Searches tool entries for the best match: [code]tool_type[/code] equals [param tool_type] (or entry's [code]tool_type[/code] is empty = wildcard) [b]and[/b] entry's [code]min_tier[/code] is [code]&lt;=[/code] [param tool_tier]. Among all matches the entry with the highest [code]min_tier[/code] is used.
+				3. If no entry matches and [method get_block_requires_tool] is [code]true[/code], returns [code]-1.0[/code].
+				4. If no entry matches and [method get_block_requires_tool] is [code]false[/code], returns [method get_block_hand_break_time].
+				[b]Example GDScript usage:[/b]
+				[codeblock]
+				var time = registry.get_block_break_time_for_tool(STONE, &"pickaxe", player_tool_tier)
+				if time &lt; 0:
+				    return  # Cannot break with this tool
+				# Wait 'time' seconds, then remove block and calculate drops
+				[/codeblock]
+			</description>
+		</method>
 	</methods>
 </class>

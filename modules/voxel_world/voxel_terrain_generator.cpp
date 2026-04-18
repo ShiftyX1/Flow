@@ -1,4 +1,4 @@
-#include "voxel_terrain_generator.h"
+﻿#include "voxel_terrain_generator.h"
 
 #include "core/math/math_funcs.h"
 
@@ -51,7 +51,7 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	erosion_noise->set_fractal_lacunarity(2.0f);
 	erosion_noise->set_fractal_gain(0.5f);
 
-	// --- 3D density: main terrain shape — overhangs, natural caves (OpenSimplex2). ---
+	// --- 3D density: main terrain shape вЂ” overhangs, natural caves (OpenSimplex2). ---
 	density_noise.instantiate();
 	density_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
 	density_noise->set_frequency(0.008f);
@@ -87,7 +87,7 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	cave_noise_b->set_fractal_lacunarity(2.0f);
 	cave_noise_b->set_fractal_gain(0.5f);
 
-	// --- Cheese cave noise (OpenSimplex2, 3D, very low frequency — large open chambers). ---
+	// --- Cheese cave noise (OpenSimplex2, 3D, very low frequency вЂ” large open chambers). ---
 	cave_cheese_noise.instantiate();
 	cave_cheese_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
 	cave_cheese_noise->set_frequency(0.007f);
@@ -177,40 +177,14 @@ int VoxelTerrainGenerator::get_biome_index_at(int p_world_x, int p_world_z) cons
 // ===========================================================================
 
 int VoxelTerrainGenerator::_get_biome_count() const {
-	if (biome_registry.is_valid() && biome_registry->get_biome_count() > 0) {
-		int n = biome_registry->get_biome_count();
-		return n < MAX_BIOMES ? n : MAX_BIOMES;
-	}
 	return (int)BIOME_MAX;
 }
 
 BiomeParams VoxelTerrainGenerator::_get_biome_params_at(int p_index) const {
-	if (biome_registry.is_valid() && p_index < biome_registry->get_biome_count()) {
-		Ref<VoxelBiomeData> bd = biome_registry->get_biome(p_index);
-		if (bd.is_valid()) {
-			BiomeParams p;
-			p.height_base = bd->get_height_base();
-			p.height_scale = bd->get_height_scale();
-			p.detail_scale = bd->get_detail_scale();
-			p.density_3d_weight = bd->get_density_3d_weight();
-			p.surface_block = (uint8_t)bd->get_surface_block();
-			p.subsurface_block = (uint8_t)bd->get_subsurface_block();
-			p.tree_density = bd->get_tree_density();
-			p.snow_line = bd->get_snow_line();
-			return p;
-		}
-	}
-	// Fallback to static table.
 	return BIOME_TABLE[p_index < (int)BIOME_MAX ? p_index : 0];
 }
 
 Vector2 VoxelTerrainGenerator::_get_biome_center_at(int p_index) const {
-	if (biome_registry.is_valid() && p_index < biome_registry->get_biome_count()) {
-		Ref<VoxelBiomeData> bd = biome_registry->get_biome(p_index);
-		if (bd.is_valid()) {
-			return Vector2(bd->get_temperature_center(), bd->get_humidity_center());
-		}
-	}
 	return BIOME_CENTERS[p_index < (int)BIOME_MAX ? p_index : 0];
 }
 
@@ -343,7 +317,7 @@ float VoxelTerrainGenerator::_get_river_factor(int p_world_x, int p_world_z) con
 	warp_x += river_warp_noise->get_noise_2d(wx * 2.0f + 500.0f, wz * 2.0f) * 20.0f;
 	warp_z += river_warp_noise->get_noise_2d(wx * 2.0f + 1500.0f, wz * 2.0f + 500.0f) * 20.0f;
 
-	// Ridged noise: abs(noise) near 0 → river center.
+	// Ridged noise: abs(noise) near 0 в†’ river center.
 	real_t raw = river_noise->get_noise_2d(wx + warp_x, wz + warp_z);
 	float ridge = Math::abs(raw);
 
@@ -381,7 +355,7 @@ float VoxelTerrainGenerator::_get_lake_factor(int p_world_x, int p_world_z) cons
 
 	real_t val = lake_noise->get_noise_2d(wx, wz);
 	if (val > LAKE_THRESHOLD) {
-		return (val - LAKE_THRESHOLD) / (1.0f - LAKE_THRESHOLD); // Normalized 0→1.
+		return (val - LAKE_THRESHOLD) / (1.0f - LAKE_THRESHOLD); // Normalized 0в†’1.
 	}
 	return 0.0f;
 }
@@ -421,7 +395,7 @@ int VoxelTerrainGenerator::_tree_trunk_height(int p_world_x, int p_world_z) cons
 	return TREE_MIN_TRUNK + (int)(h % (TREE_MAX_TRUNK - TREE_MIN_TRUNK + 1));
 }
 
-void VoxelTerrainGenerator::_place_tree(uint8_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height) const {
+void VoxelTerrainGenerator::_place_tree(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height) const {
 	int trunk_top = p_surface_y + p_trunk_height;
 
 	for (int y = p_surface_y + 1; y <= trunk_top; y++) {
@@ -469,12 +443,12 @@ void VoxelTerrainGenerator::_place_tree(uint8_t *p_blocks, int p_local_x, int p_
 // Main chunk generation
 // ===========================================================================
 
-Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_chunk_z) const {
+Vector<uint16_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_chunk_z) const {
 	const int total = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
-	Vector<uint8_t> blocks;
+	Vector<uint16_t> blocks;
 	blocks.resize(total);
-	uint8_t *blocks_w = blocks.ptrw();
-	memset(blocks_w, VOXEL_BLOCK_AIR, total);
+	uint16_t *blocks_w = blocks.ptrw();
+	memset(blocks_w, 0, total * sizeof(uint16_t));
 
 	const int biome_count = _get_biome_count();
 
@@ -551,8 +525,8 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 			float river_bank_target = (float)(sea_level + 1);
 
 			// River bank blending FIRST. Inside the river zone (rf > 0) treat the bank
-			// factor as fully applied (1.0) so the bank→river transition is spatially
-			// continuous — prevents the "wall" that forms when the bank effect vanishes
+			// factor as fully applied (1.0) so the bankв†’river transition is spatially
+			// continuous вЂ” prevents the "wall" that forms when the bank effect vanishes
 			// exactly where the river factor starts from zero.
 			float effective_rbf = (rf > 0.0f) ? 1.0f : rbf;
 			if (effective_rbf > 0.0f && bh > (float)(sea_level + RIVER_MIN_HEIGHT)) {
@@ -661,7 +635,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 
 			for (int y = CHUNK_SIZE_Y - 1; y >= 1; y--) {
 				int idx = block_index(x, y, z);
-				uint8_t block = blocks_w[idx];
+				uint16_t block = blocks_w[idx];
 
 				if (block != VOXEL_BLOCK_STONE) {
 					continue;
@@ -670,7 +644,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 				int depth = sh - y;
 
 				if (depth == 0) {
-					// Surface block — biome-dependent.
+					// Surface block вЂ” biome-dependent.
 					if (is_water_body || sh <= wl) {
 						blocks_w[idx] = VOXEL_BLOCK_SAND;
 					} else if (sh <= wl + BEACH_HEIGHT && flat_shore) {
@@ -681,7 +655,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 						blocks_w[idx] = bp.surface_block;
 					}
 				} else if (depth <= 4) {
-					// Subsurface — biome-dependent.
+					// Subsurface вЂ” biome-dependent.
 					if (is_water_body || (sh <= wl + BEACH_HEIGHT && flat_shore)) {
 						blocks_w[idx] = VOXEL_BLOCK_SAND;
 					} else {
@@ -706,7 +680,7 @@ Vector<uint8_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p_
 
 			for (int y = 1; y <= sh; y++) {
 				int idx = block_index(x, y, z);
-				uint8_t block = blocks_w[idx];
+				uint16_t block = blocks_w[idx];
 
 				if (block == VOXEL_BLOCK_AIR || block == VOXEL_BLOCK_WATER || block == VOXEL_BLOCK_BEDROCK) {
 					continue;

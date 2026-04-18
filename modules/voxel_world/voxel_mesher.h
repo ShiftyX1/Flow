@@ -1,6 +1,5 @@
 #pragma once
 
-#include "voxel_block_data.h"
 #include "voxel_block_registry.h"
 #include "voxel_terrain_generator.h"
 
@@ -26,10 +25,10 @@ public:
 	// Pointers to the block arrays of the four horizontal neighbours (null = treat as air).
 	// px = +X neighbour, nx = -X neighbour, pz = +Z neighbour, nz = -Z neighbour.
 	struct NeighborBlocks {
-		const uint8_t *px;
-		const uint8_t *nx;
-		const uint8_t *pz;
-		const uint8_t *nz;
+		const uint16_t *px;
+		const uint16_t *nx;
+		const uint16_t *pz;
+		const uint16_t *nz;
 		NeighborBlocks() : px(nullptr), nx(nullptr), pz(nullptr), nz(nullptr) {}
 	};
 
@@ -48,42 +47,42 @@ public:
 		float ao;
 	};
 
-	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags = 0, const NeighborBlocks &p_neighbors = NeighborBlocks(), const uint8_t *p_light_data = nullptr, const NeighborLight &p_neighbor_light = NeighborLight());
+	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint16_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const NeighborBlocks &p_neighbors = NeighborBlocks(), const uint8_t *p_light_data = nullptr, const NeighborLight &p_neighbor_light = NeighborLight());
 
 private:
 	static const int CX = VoxelTerrainGenerator::CHUNK_SIZE_X;
 	static const int CY = VoxelTerrainGenerator::CHUNK_SIZE_Y;
 	static const int CZ = VoxelTerrainGenerator::CHUNK_SIZE_Z;
 
-	static _FORCE_INLINE_ VoxelBlockType get_block(const uint8_t *p_blocks, int p_x, int p_y, int p_z, const NeighborBlocks &p_neighbors = NeighborBlocks()) {
+	static _FORCE_INLINE_ int get_block(const uint16_t *p_blocks, int p_x, int p_y, int p_z, const NeighborBlocks &p_neighbors = NeighborBlocks()) {
 		if (p_y < 0 || p_y >= CY) {
 			return VOXEL_BLOCK_AIR;
 		}
 		if (p_x < 0) {
 			if (p_neighbors.nx) {
-				return (VoxelBlockType)p_neighbors.nx[VoxelTerrainGenerator::block_index(p_x + CX, p_y, p_z)];
+				return (int)p_neighbors.nx[VoxelTerrainGenerator::block_index(p_x + CX, p_y, p_z)];
 			}
 			return VOXEL_BLOCK_AIR;
 		}
 		if (p_x >= CX) {
 			if (p_neighbors.px) {
-				return (VoxelBlockType)p_neighbors.px[VoxelTerrainGenerator::block_index(p_x - CX, p_y, p_z)];
+				return (int)p_neighbors.px[VoxelTerrainGenerator::block_index(p_x - CX, p_y, p_z)];
 			}
 			return VOXEL_BLOCK_AIR;
 		}
 		if (p_z < 0) {
 			if (p_neighbors.nz) {
-				return (VoxelBlockType)p_neighbors.nz[VoxelTerrainGenerator::block_index(p_x, p_y, p_z + CZ)];
+				return (int)p_neighbors.nz[VoxelTerrainGenerator::block_index(p_x, p_y, p_z + CZ)];
 			}
 			return VOXEL_BLOCK_AIR;
 		}
 		if (p_z >= CZ) {
 			if (p_neighbors.pz) {
-				return (VoxelBlockType)p_neighbors.pz[VoxelTerrainGenerator::block_index(p_x, p_y, p_z - CZ)];
+				return (int)p_neighbors.pz[VoxelTerrainGenerator::block_index(p_x, p_y, p_z - CZ)];
 			}
 			return VOXEL_BLOCK_AIR;
 		}
-		return (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)];
+		return (int)p_blocks[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)];
 	}
 
 	// Get sunlight (high nibble) from light data, with cross-chunk neighbor support.
@@ -147,10 +146,11 @@ private:
 	}
 
 	// Compute smooth light + AO for a single face vertex.
-	static VertexLight compute_vertex_light(const uint8_t *p_blocks, const uint8_t *p_light,
+	static VertexLight compute_vertex_light(const uint16_t *p_blocks, const uint8_t *p_light,
 			int bx, int by, int bz,
 			const Vector3 &p_normal, int p_corner_u, int p_corner_v,
-			const NeighborBlocks &p_nb, const NeighborLight &p_nl);
+			const NeighborBlocks &p_nb, const NeighborLight &p_nl,
+			const VoxelBlockRegistry *p_reg);
 
 	struct SurfaceData {
 		Vector<Vector3> vertices;

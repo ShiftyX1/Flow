@@ -1,6 +1,5 @@
 #include "voxel_world.h"
 
-#include "voxel_block_data.h"
 #include "core/config/engine.h"
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
@@ -25,14 +24,8 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_texture_filter", "filter"), &VoxelWorld::set_texture_filter);
 	ClassDB::bind_method(D_METHOD("get_texture_filter"), &VoxelWorld::get_texture_filter);
 
-	ClassDB::bind_method(D_METHOD("set_alpha_block_flags", "flags"), &VoxelWorld::set_alpha_block_flags);
-	ClassDB::bind_method(D_METHOD("get_alpha_block_flags"), &VoxelWorld::get_alpha_block_flags);
-
 	ClassDB::bind_method(D_METHOD("set_block_registry", "registry"), &VoxelWorld::set_block_registry);
 	ClassDB::bind_method(D_METHOD("get_block_registry"), &VoxelWorld::get_block_registry);
-
-	ClassDB::bind_method(D_METHOD("set_biome_registry", "registry"), &VoxelWorld::set_biome_registry);
-	ClassDB::bind_method(D_METHOD("get_biome_registry"), &VoxelWorld::get_biome_registry);
 
 	ClassDB::bind_method(D_METHOD("set_verbose_logging", "enabled"), &VoxelWorld::set_verbose_logging);
 	ClassDB::bind_method(D_METHOD("get_verbose_logging"), &VoxelWorld::get_verbose_logging);
@@ -82,9 +75,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "block_size", PROPERTY_HINT_RANGE, "0.1,10.0,0.1"), "set_block_size", "get_block_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sea_level", PROPERTY_HINT_RANGE, "0,191,1"), "set_sea_level", "get_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "alpha_block_flags", PROPERTY_HINT_FLAGS, "Air,Grass,Dirt,Stone,Sand,Water,Snow,Wood,Leaves,Bedrock,Torch"), "set_alpha_block_flags", "get_alpha_block_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
 
 	ADD_GROUP("Chunk Borders", "chunk_border_");
@@ -112,17 +103,18 @@ void VoxelWorld::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
 	ADD_SIGNAL(MethodInfo("block_broken", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "old_block_id")));
 
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_AIR);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_GRASS);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_DIRT);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_STONE);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_SAND);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_WATER);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_SNOW);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_WOOD);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_LEAVES);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_BEDROCK);
-	BIND_ENUM_CONSTANT(VOXEL_BLOCK_TORCH);
+	// Default block ID constants (convenience for GDScript).
+	BIND_CONSTANT(VOXEL_BLOCK_AIR);
+	BIND_CONSTANT(VOXEL_BLOCK_GRASS);
+	BIND_CONSTANT(VOXEL_BLOCK_DIRT);
+	BIND_CONSTANT(VOXEL_BLOCK_STONE);
+	BIND_CONSTANT(VOXEL_BLOCK_SAND);
+	BIND_CONSTANT(VOXEL_BLOCK_WATER);
+	BIND_CONSTANT(VOXEL_BLOCK_SNOW);
+	BIND_CONSTANT(VOXEL_BLOCK_WOOD);
+	BIND_CONSTANT(VOXEL_BLOCK_LEAVES);
+	BIND_CONSTANT(VOXEL_BLOCK_BEDROCK);
+	BIND_CONSTANT(VOXEL_BLOCK_TORCH);
 }
 
 VoxelWorld::VoxelWorld() {
@@ -155,27 +147,12 @@ void VoxelWorld::set_texture_filter(BaseMaterial3D::TextureFilter p_filter) {
 	texture_filter = p_filter;
 }
 
-void VoxelWorld::set_alpha_block_flags(uint32_t p_flags) {
-	alpha_block_flags = p_flags;
-}
-
 void VoxelWorld::set_block_registry(const Ref<VoxelBlockRegistry> &p_registry) {
 	block_registry = p_registry;
 }
 
 Ref<VoxelBlockRegistry> VoxelWorld::get_block_registry() const {
 	return block_registry;
-}
-
-void VoxelWorld::set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry) {
-	biome_registry = p_registry;
-	if (generator) {
-		generator->set_biome_registry(biome_registry);
-	}
-}
-
-Ref<VoxelBiomeRegistry> VoxelWorld::get_biome_registry() const {
-	return biome_registry;
 }
 
 // --- Day/Night Cycle setters ---
@@ -595,7 +572,6 @@ void VoxelWorld::_initialize_world() {
 	}
 	generator->set_seed(effective_seed);
 	generator->set_sea_level(sea_level);
-	generator->set_biome_registry(biome_registry);
 
 	if (verbose_logging) {
 		print_line("[VoxelWorld] Seed: " + itos(effective_seed) + ", sea_level: " + itos(sea_level) + ", block_size: " + rtos(block_size) + ", load_radius: " + itos(chunk_load_radius));
@@ -614,8 +590,8 @@ void VoxelWorld::_initialize_world() {
 	// and the property assignments below set correct physics/lighting for all built-in types.
 	block_registry->setup_defaults();
 
-	// Populate thread-safe cache from registry so mesher/lighting threads read correct values.
-	VoxelBlockData::load_from_registry(*block_registry.ptr());
+	// Finalize registry — builds flat cache arrays for thread-safe access.
+	block_registry->finalize();
 
 	material.instantiate();
 	material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
@@ -815,7 +791,7 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	if (data->neighbor_light_pz.size() > 0) { light_nb.light_pz = data->neighbor_light_pz.ptr(); }
 	if (data->neighbor_light_nz.size() > 0) { light_nb.light_nz = data->neighbor_light_nz.ptr(); }
 
-	VoxelLightMap::propagate_sunlight(result.light_data.ptrw(), result.blocks.ptr(), light_nb);
+	VoxelLightMap::propagate_sunlight(result.light_data.ptrw(), result.blocks.ptr(), light_nb, world->block_registry->get_cache_light_opacity().ptr());
 
 	// Build NeighborBlocks from snapshots captured on the main thread at queue time.
 	VoxelMesher::NeighborBlocks nb;
@@ -831,7 +807,7 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	if (data->neighbor_light_pz.size() > 0) { mesh_nl.pz = data->neighbor_light_pz.ptr(); }
 	if (data->neighbor_light_nz.size() > 0) { mesh_nl.nz = data->neighbor_light_nz.ptr(); }
 
-	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, world->alpha_block_flags, nb, result.light_data.ptr(), mesh_nl);
+	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, nb, result.light_data.ptr(), mesh_nl);
 
 	{
 		MutexLock lock(world->finished_mutex);
@@ -854,9 +830,9 @@ void VoxelWorld::_request_chunk(int p_cx, int p_cz) {
 	task_data->chunk_z = p_cz;
 
 	// Snapshot loaded neighbour block arrays so the background thread can build seam-free meshes.
-	auto snapshot_nb = [&](int dx, int dz) -> Vector<uint8_t> {
+	auto snapshot_nb = [&](int dx, int dz) -> Vector<uint16_t> {
 		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_cx + dx, p_cz + dz));
-		return nb ? (*nb)->get_blocks() : Vector<uint8_t>();
+		return nb ? (*nb)->get_blocks() : Vector<uint16_t>();
 	};
 	auto snapshot_light = [&](int dx, int dz) -> Vector<uint8_t> {
 		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_cx + dx, p_cz + dz));
@@ -927,7 +903,7 @@ void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<Voxe
 			mat->set_texture_filter(texture_filter);
 
 			int btype = p_surfaces[s].block_type;
-			if (btype >= 0 && (alpha_block_flags & (1 << btype))) {
+			if (btype >= 0 && block_registry.is_valid() && block_registry->is_uses_alpha(btype)) {
 				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
 				mat->set_alpha_scissor_threshold(0.5f);
 			}
@@ -952,18 +928,18 @@ void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<Voxe
 
 // ---- Block light (OmniLight3D) management ----
 
-void VoxelWorld::_spawn_block_light(const Vector3i &p_block_pos, VoxelBlockType p_type) {
+void VoxelWorld::_spawn_block_light(const Vector3i &p_block_pos, int p_type) {
 	if (block_lights.has(p_block_pos)) {
 		return; // Already spawned.
 	}
-	uint8_t emission = VoxelBlockData::get_block_emission(p_type);
+	uint8_t emission = block_registry->get_emission(p_type);
 	if (emission == 0) {
 		return;
 	}
 	OmniLight3D *light = memnew(OmniLight3D);
 	light->set_param(Light3D::PARAM_RANGE, (float)emission * block_size);
 	light->set_param(Light3D::PARAM_ENERGY, 10.0f);
-	light->set_color(VoxelBlockData::get_block_light_color(p_type));
+	light->set_color(block_registry->get_cached_light_color(p_type));
 	light->set_position(block_to_world_pos(p_block_pos));
 	light->set_shadow(true);
 	add_child(light);
@@ -984,15 +960,15 @@ void VoxelWorld::_remove_block_light(const Vector3i &p_block_pos) {
 }
 
 void VoxelWorld::_scan_chunk_for_lights(VoxelChunk *p_chunk) {
-	const Vector<uint8_t> &blocks = p_chunk->get_blocks();
+	const Vector<uint16_t> &blocks = p_chunk->get_blocks();
 	Vector2i cpos = p_chunk->get_chunk_pos();
 	int base_bx = cpos.x * VoxelChunk::SIZE_X;
 	int base_bz = cpos.y * VoxelChunk::SIZE_Z;
 	for (int y = 0; y < VoxelChunk::SIZE_Y; y++) {
 		for (int z = 0; z < VoxelChunk::SIZE_Z; z++) {
 			for (int x = 0; x < VoxelChunk::SIZE_X; x++) {
-				VoxelBlockType type = (VoxelBlockType)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
-				if (VoxelBlockData::get_block_emission(type) > 0) {
+				int type = (int)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+				if (block_registry->get_emission(type) > 0) {
 					_spawn_block_light(Vector3i(base_bx + x, y, base_bz + z), type);
 				}
 			}
@@ -1004,7 +980,7 @@ void VoxelWorld::_scan_chunk_for_lights(VoxelChunk *p_chunk) {
 void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 	Vector2i cpos = p_chunk->get_chunk_pos();
 	VoxelMesher::NeighborBlocks nb;
-	auto snap = [&](int dx, int dz) -> const uint8_t * {
+	auto snap = [&](int dx, int dz) -> const uint16_t * {
 		VoxelChunk *const *n = loaded_chunks.getptr(Vector2i(cpos.x + dx, cpos.y + dz));
 		return n ? (*n)->get_blocks().ptr() : nullptr;
 	};
@@ -1018,7 +994,7 @@ void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 	memset(p_chunk->get_light_data_rw().ptrw(), 0, p_chunk->get_light_data().size());
 
 	VoxelLightMap::NeighborData light_nb;
-	auto snap_blocks_vec = [&](int dx, int dz) -> const uint8_t * {
+	auto snap_blocks_vec = [&](int dx, int dz) -> const uint16_t * {
 		VoxelChunk *const *n = loaded_chunks.getptr(Vector2i(cpos.x + dx, cpos.y + dz));
 		return n ? (*n)->get_blocks().ptr() : nullptr;
 	};
@@ -1035,7 +1011,7 @@ void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 	light_nb.light_pz = snap_light(0, 1);
 	light_nb.light_nz = snap_light(0, -1);
 
-	VoxelLightMap::propagate_sunlight(p_chunk->get_light_data_rw().ptrw(), p_chunk->get_blocks().ptr(), light_nb);
+	VoxelLightMap::propagate_sunlight(p_chunk->get_light_data_rw().ptrw(), p_chunk->get_blocks().ptr(), light_nb, block_registry->get_cache_light_opacity().ptr());
 
 	VoxelMesher::NeighborLight mesh_nl;
 	mesh_nl.px = snap_light(1, 0);
@@ -1044,7 +1020,7 @@ void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 	mesh_nl.nz = snap_light(0, -1);
 
 	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(
-			p_chunk->get_blocks(), block_size, block_registry, alpha_block_flags, nb,
+			p_chunk->get_blocks(), block_size, block_registry, nb,
 			p_chunk->get_light_data().ptr(), mesh_nl);
 	_apply_surfaces_to_chunk(p_chunk, surfaces);
 }
@@ -1068,9 +1044,9 @@ void VoxelWorld::_request_remesh(const Vector2i &p_key) {
 	task_data->pre_blocks = (*chunk_ptr)->get_blocks(); // snapshot
 	task_data->pre_light = (*chunk_ptr)->get_light_data(); // light snapshot
 
-	auto snapshot_nb = [&](int dx, int dz) -> Vector<uint8_t> {
+	auto snapshot_nb = [&](int dx, int dz) -> Vector<uint16_t> {
 		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_key.x + dx, p_key.y + dz));
-		return nb ? (*nb)->get_blocks() : Vector<uint8_t>();
+		return nb ? (*nb)->get_blocks() : Vector<uint16_t>();
 	};
 	auto snapshot_light_nb = [&](int dx, int dz) -> Vector<uint8_t> {
 		VoxelChunk *const *nb = loaded_chunks.getptr(Vector2i(p_key.x + dx, p_key.y + dz));
@@ -1217,12 +1193,12 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 
 	// Remove OmniLight3D nodes for emissive blocks in this chunk.
 	{
-		const Vector<uint8_t> &blocks = chunk->get_blocks();
+		const Vector<uint16_t> &blocks = chunk->get_blocks();
 		for (int y = 0; y < VoxelChunk::SIZE_Y; y++) {
 			for (int z = 0; z < VoxelChunk::SIZE_Z; z++) {
 				for (int x = 0; x < VoxelChunk::SIZE_X; x++) {
-					VoxelBlockType type = (VoxelBlockType)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
-					if (VoxelBlockData::get_block_emission(type) > 0) {
+					int type = (int)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+					if (block_registry->get_emission(type) > 0) {
 						_remove_block_light(Vector3i(p_cx * VoxelChunk::SIZE_X + x, y, p_cz * VoxelChunk::SIZE_Z + z));
 					}
 				}
@@ -1295,7 +1271,7 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 	VoxelChunk *chunk = *chunk_ptr;
 
 	int old_id = (int)chunk->get_block(local.x, local.y, local.z);
-	chunk->set_block(local.x, local.y, local.z, (VoxelBlockType)p_block_id);
+	chunk->set_block(local.x, local.y, local.z, p_block_id);
 
 	// Manage OmniLight3D for emissive blocks (e.g. torches).
 	{
@@ -1303,11 +1279,11 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 				chunk_key.x * VoxelChunk::SIZE_X + local.x,
 				local.y,
 				chunk_key.y * VoxelChunk::SIZE_Z + local.z);
-		if (VoxelBlockData::get_block_emission((VoxelBlockType)old_id) > 0) {
+		if (block_registry->get_emission(old_id) > 0) {
 			_remove_block_light(light_pos);
 		}
-		if (VoxelBlockData::get_block_emission((VoxelBlockType)p_block_id) > 0) {
-			_spawn_block_light(light_pos, (VoxelBlockType)p_block_id);
+		if (block_registry->get_emission(p_block_id) > 0) {
+			_spawn_block_light(light_pos, p_block_id);
 		}
 	}
 
@@ -1339,7 +1315,7 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 
 String VoxelWorld::get_block_name_at(const Vector3 &p_world_pos) const {
 	int block_id = get_block_at(p_world_pos);
-	return VoxelBlockData::get_block_name((VoxelBlockType)block_id);
+	return block_registry.is_valid() ? block_registry->get_block_name(block_id) : String();
 }
 
 int VoxelWorld::get_biome_at(const Vector3 &p_world_pos) const {
@@ -1355,12 +1331,6 @@ String VoxelWorld::get_biome_name_at(const Vector3 &p_world_pos) const {
 	int index = get_biome_at(p_world_pos);
 	if (index < 0) {
 		return String("Unknown");
-	}
-	if (biome_registry.is_valid() && index < biome_registry->get_biome_count()) {
-		Ref<VoxelBiomeData> bd = biome_registry->get_biome(index);
-		if (bd.is_valid()) {
-			return bd->get_biome_name();
-		}
 	}
 	// Fallback names for the four built-in static biomes.
 	static const char *fallback_names[] = { "Desert", "Meadow", "Forest", "Mountains" };
@@ -1416,7 +1386,7 @@ Dictionary VoxelWorld::raycast_block(const Vector3 &p_origin, const Vector3 &p_d
 			Vector3 block_center((bx + 0.5f) * block_size, (by + 0.5f) * block_size, (bz + 0.5f) * block_size);
 			int block_id = get_block_at(block_center);
 
-			bool is_solid = VoxelBlockData::is_solid((VoxelBlockType)block_id);
+			bool is_solid = block_registry.is_valid() && block_registry->is_solid(block_id);
 
 			if (is_solid) {
 				result["position"] = p_origin + dir * t;

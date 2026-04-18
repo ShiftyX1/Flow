@@ -12,10 +12,11 @@ static void push_custom0_vertex(Vector<uint8_t> &r_custom0, const VoxelMesher::V
 	r_custom0.push_back(255); // Reserved alpha.
 }
 
-VoxelMesher::VertexLight VoxelMesher::compute_vertex_light(const uint8_t *p_blocks, const uint8_t *p_light,
+VoxelMesher::VertexLight VoxelMesher::compute_vertex_light(const uint16_t *p_blocks, const uint8_t *p_light,
 		int bx, int by, int bz,
 		const Vector3 &p_normal, int p_corner_u, int p_corner_v,
-		const NeighborBlocks &p_nb, const NeighborLight &p_nl) {
+		const NeighborBlocks &p_nb, const NeighborLight &p_nl,
+		const VoxelBlockRegistry *p_reg) {
 	VertexLight result;
 
 	if (!p_light) {
@@ -68,8 +69,8 @@ VoxelMesher::VertexLight VoxelMesher::compute_vertex_light(const uint8_t *p_bloc
 	int count = 0;
 
 	for (int i = 0; i < 4; i++) {
-		VoxelBlockType stype = get_block(p_blocks, samples[i][0], samples[i][1], samples[i][2], p_nb);
-		if (!VoxelBlockData::is_solid(stype)) {
+		int stype = get_block(p_blocks, samples[i][0], samples[i][1], samples[i][2], p_nb);
+		if (!p_reg->is_solid(stype)) {
 			sun_sum += (float)get_light_sun(p_light, samples[i][0], samples[i][1], samples[i][2], p_nl);
 			bl_sum += (float)get_light_block(p_light, samples[i][0], samples[i][1], samples[i][2], p_nl);
 			count++;
@@ -85,9 +86,9 @@ VoxelMesher::VertexLight VoxelMesher::compute_vertex_light(const uint8_t *p_bloc
 	}
 
 	// AO: check solidity of the 3 relevant neighbors (side1, side2, corner).
-	bool side1 = VoxelBlockData::is_solid(get_block(p_blocks, fx + du_x, fy + du_y, fz + du_z, p_nb));
-	bool side2 = VoxelBlockData::is_solid(get_block(p_blocks, fx + dv_x, fy + dv_y, fz + dv_z, p_nb));
-	bool corner = VoxelBlockData::is_solid(get_block(p_blocks, fx + du_x + dv_x, fy + du_y + dv_y, fz + du_z + dv_z, p_nb));
+	bool side1 = p_reg->is_solid(get_block(p_blocks, fx + du_x, fy + du_y, fz + du_z, p_nb));
+	bool side2 = p_reg->is_solid(get_block(p_blocks, fx + dv_x, fy + dv_y, fz + dv_z, p_nb));
+	bool corner = p_reg->is_solid(get_block(p_blocks, fx + du_x + dv_x, fy + du_y + dv_y, fz + du_z + dv_z, p_nb));
 	result.ao = compute_ao(side1, side2, corner);
 
 	return result;
@@ -184,8 +185,8 @@ static const FaceCorners corners_pz = { { 0, 0, -1, -1 }, { -1, 0, 0, -1 } };
 // -Z face: v0=(-1,-1), v1=(-1,+1), v2=(+1,+1), v3=(+1,-1) (u=X, v=Y)
 static const FaceCorners corners_nz = { { -1, -1, 0, 0 }, { -1, 0, 0, -1 } };
 
-Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint8_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, uint32_t p_alpha_block_flags, const NeighborBlocks &p_neighbors, const uint8_t *p_light_data, const NeighborLight &p_neighbor_light) {
-	const uint8_t *blocks = p_blocks.ptr();
+Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint16_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const NeighborBlocks &p_neighbors, const uint8_t *p_light_data, const NeighborLight &p_neighbor_light) {
+	const uint16_t *blocks = p_blocks.ptr();
 
 	SurfaceData untextured_surface;
 	HashMap<Ref<Texture2D>, SurfaceData> textured_surfaces;
@@ -199,36 +200,37 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 	HashMap<int, ShaderSurfaceInfo> shader_surfaces;
 
 	bool use_registry = p_registry.is_valid();
+	const VoxelBlockRegistry *reg = use_registry ? p_registry.ptr() : nullptr;
 
 	for (int y = 0; y < CY; y++) {
 		for (int z = 0; z < CZ; z++) {
 			for (int x = 0; x < CX; x++) {
-				VoxelBlockType type = (VoxelBlockType)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+				int type = (int)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
 
 				if (type == VOXEL_BLOCK_AIR) {
 					continue;
 				}
 
-				bool solid = VoxelBlockData::is_solid(type);
+				bool solid = use_registry ? reg->is_solid(type) : true;
 				if (!solid) {
-					if (!use_registry || !p_registry->block_has_shader((int)type)) {
+					if (!use_registry || !reg->block_has_shader(type)) {
 						continue;
 					}
 				}
 
-				Color col = VoxelBlockData::block_colors[type];
+				Color col = use_registry ? reg->get_color(type) : Color(1, 1, 1);
 				float bs = p_block_size;
 				Vector3 origin(x * bs, y * bs, z * bs);
 
 				auto should_show_face = [&](int nx, int ny, int nz) -> bool {
-					VoxelBlockType neighbor = get_block(blocks, nx, ny, nz, p_neighbors);
+					int neighbor = get_block(blocks, nx, ny, nz, p_neighbors);
 					if (!solid) {
 						return neighbor == VOXEL_BLOCK_AIR;
 					}
-					if (VoxelBlockData::is_transparent(neighbor)) {
+					if (use_registry && reg->is_transparent(neighbor)) {
 						return true;
 					}
-					if (p_alpha_block_flags & (1 << (int)neighbor)) {
+					if (use_registry && reg->is_uses_alpha(neighbor)) {
 						return true;
 					}
 					return false;
@@ -236,35 +238,35 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 
 				Ref<ShaderMaterial> block_shader;
 				if (use_registry) {
-					block_shader = p_registry->get_block_shader_material((int)type);
+					block_shader = p_registry->get_block_shader_material(type);
 				}
 
 				Ref<Texture2D> tex_top, tex_bottom, tex_side;
 				if (use_registry) {
-					tex_top = p_registry->get_block_texture_for_face((int)type, Vector3(0, 1, 0));
-					tex_bottom = p_registry->get_block_texture_for_face((int)type, Vector3(0, -1, 0));
-					tex_side = p_registry->get_block_texture_for_face((int)type, Vector3(1, 0, 0));
+					tex_top = p_registry->get_block_texture_for_face(type, Vector3(0, 1, 0));
+					tex_bottom = p_registry->get_block_texture_for_face(type, Vector3(0, -1, 0));
+					tex_side = p_registry->get_block_texture_for_face(type, Vector3(1, 0, 0));
 				}
 
-				float mesh_h = use_registry ? p_registry->get_block_mesh_height((int)type) : 1.0f;
+				float mesh_h = use_registry ? p_registry->get_block_mesh_height(type) : 1.0f;
 				const float top_y = bs * mesh_h;
 
 				// Shared array for vertex lights — filled per face.
 				VertexLight vl[4];
 				auto fill_face_vl = [&](const Vector3 &normal, const FaceCorners &corners) {
 					for (int i = 0; i < 4; i++) {
-						vl[i] = compute_vertex_light(blocks, p_light_data, x, y, z, normal, corners.u[i], corners.v[i], p_neighbors, p_neighbor_light);
+						vl[i] = compute_vertex_light(blocks, p_light_data, x, y, z, normal, corners.u[i], corners.v[i], p_neighbors, p_neighbor_light, reg);
 					}
 				};
 
 				if (block_shader.is_valid()) {
-					if (!shader_surfaces.has((int)type)) {
+					if (!shader_surfaces.has(type)) {
 						ShaderSurfaceInfo info;
 						info.shader_material = block_shader;
 						info.texture = tex_top.is_valid() ? tex_top : (tex_side.is_valid() ? tex_side : tex_bottom);
-						shader_surfaces[(int)type] = info;
+						shader_surfaces[type] = info;
 					}
-					SurfaceData *surf = &shader_surfaces[(int)type].surface;
+					SurfaceData *surf = &shader_surfaces[type].surface;
 					bool has_tex = tex_top.is_valid() || tex_side.is_valid() || tex_bottom.is_valid();
 					Color face_col = has_tex ? Color(1, 1, 1) : col;
 
@@ -296,7 +298,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					auto get_face_surface = [&](const Ref<Texture2D> &p_tex) -> SurfaceData * {
 						if (p_tex.is_valid()) {
 							if (!textured_block_types.has(p_tex)) {
-								textured_block_types[p_tex] = (int)type;
+								textured_block_types[p_tex] = type;
 							}
 							return &textured_surfaces[p_tex];
 						}

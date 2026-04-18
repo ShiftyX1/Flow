@@ -1,6 +1,6 @@
 #include "voxel_block_registry_editor_plugin.h"
 
-#include "../voxel_block_data.h"
+#include "../voxel_block_registry.h"
 #include "../voxel_block_registry.h"
 
 #include "core/object/callable_mp.h"
@@ -173,14 +173,13 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 	}
 
 	// Ensure all engine-defined block types have entries in the registry.
-	for (int i = 0; i < VOXEL_BLOCK_TYPE_MAX; i++) {
-		if (!registry->has_block(i)) {
-			registry->create_block(i);
-		}
-	}
+	// Always call setup_defaults() — it merges names and physics/lighting
+	// defaults into existing entries without overwriting textures from .tscn.
+	registry->setup_defaults();
+	int block_count = registry->get_block_count();
 
-	// Always show all engine-defined block types (skip AIR=0).
-	for (int block_id = 1; block_id < VOXEL_BLOCK_TYPE_MAX; block_id++) {
+	// Always show all registered block types (skip AIR=0).
+	for (int block_id = 1; block_id < block_count; block_id++) {
 
 		// --- Block header: color swatch + name ---
 		HBoxContainer *header = memnew(HBoxContainer);
@@ -188,11 +187,9 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 		block_list_vbox->add_child(header);
 
 		ColorRect *swatch = memnew(ColorRect);
-		String block_name;
-		if (block_id >= 0 && block_id < VOXEL_BLOCK_TYPE_MAX) {
-			block_name = VoxelBlockData::get_block_name((VoxelBlockType)block_id);
-		} else {
-			block_name = "Custom #" + itos(block_id);
+		String block_name = registry->get_block_name(block_id);
+		if (block_name.is_empty()) {
+			block_name = "Block #" + itos(block_id);
 		}
 		Color block_color = registry->has_block(block_id) ? registry->get_block_color(block_id) : Color(1, 1, 1);
 		swatch->set_color(block_color);

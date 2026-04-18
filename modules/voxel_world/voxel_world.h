@@ -14,14 +14,10 @@
 #include "scene/resources/environment.h"
 #include "scene/resources/material.h"
 
-VARIANT_ENUM_CAST(VoxelBlockType);
-
 class VoxelWorld : public Node3D {
 	GDCLASS(VoxelWorld, Node3D);
 
 public:
-	// Bitfield: bit N = block type N uses alpha-transparency.
-	// e.g. (1 << VOXEL_BLOCK_LEAVES) enables alpha for leaves.
 
 private:
 	int seed = -1;
@@ -29,7 +25,6 @@ private:
 	float block_size = 1.0f;
 	int sea_level = 52;
 	int chunks_per_frame = 4; // Max chunks to integrate into scene tree per frame.
-	uint32_t alpha_block_flags = 0; // Bitfield of AlphaBlockFlags.
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 	bool verbose_logging = true;
 
@@ -63,7 +58,6 @@ private:
 	WorldEnvironment *env_node = nullptr;
 
 	Ref<VoxelBlockRegistry> block_registry;
-	Ref<VoxelBiomeRegistry> biome_registry;
 
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
@@ -79,7 +73,7 @@ private:
 	// Data produced by background thread (no Godot scene API).
 	struct ChunkTaskResult {
 		Vector2i key;
-		Vector<uint8_t> blocks;
+		Vector<uint16_t> blocks;
 		Vector<uint8_t> light_data;
 		Vector<VoxelMesher::MeshSurface> surfaces;
 		bool is_remesh = false; // true = update existing chunk, false = create new chunk
@@ -102,9 +96,9 @@ private:
 		int chunk_x = 0;
 		int chunk_z = 0;
 		bool is_remesh = false;
-		Vector<uint8_t> pre_blocks; // block data snapshot used for remesh tasks
+		Vector<uint16_t> pre_blocks; // block data snapshot used for remesh tasks
 		// Snapshots of loaded neighbour block arrays at task-queue time (empty = not loaded)
-		Vector<uint8_t> neighbor_px, neighbor_nx, neighbor_pz, neighbor_nz;
+		Vector<uint16_t> neighbor_px, neighbor_nx, neighbor_pz, neighbor_nz;
 		// Light data snapshots for neighbours (used during remesh).
 		Vector<uint8_t> neighbor_light_px, neighbor_light_nx, neighbor_light_pz, neighbor_light_nz;
 		Vector<uint8_t> pre_light; // light snapshot for remesh
@@ -123,7 +117,7 @@ private:
 
 	// Block-emitting light nodes (OmniLight3D per emissive block in loaded chunks).
 	HashMap<Vector3i, OmniLight3D *> block_lights;
-	void _spawn_block_light(const Vector3i &p_block_pos, VoxelBlockType p_type);
+	void _spawn_block_light(const Vector3i &p_block_pos, int p_type);
 	void _remove_block_light(const Vector3i &p_block_pos);
 	void _scan_chunk_for_lights(VoxelChunk *p_chunk);
 
@@ -162,14 +156,8 @@ public:
 	void set_texture_filter(BaseMaterial3D::TextureFilter p_filter);
 	BaseMaterial3D::TextureFilter get_texture_filter() const { return texture_filter; }
 
-	void set_alpha_block_flags(uint32_t p_flags);
-	uint32_t get_alpha_block_flags() const { return alpha_block_flags; }
-
 	void set_block_registry(const Ref<VoxelBlockRegistry> &p_registry);
 	Ref<VoxelBlockRegistry> get_block_registry() const;
-
-	void set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry);
-	Ref<VoxelBiomeRegistry> get_biome_registry() const;
 
 	void set_verbose_logging(bool p_enabled) { verbose_logging = p_enabled; }
 	bool get_verbose_logging() const { return verbose_logging; }

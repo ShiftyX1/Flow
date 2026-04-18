@@ -1,32 +1,32 @@
-#include "voxel_light_map.h"
+﻿#include "voxel_light_map.h"
 
-void VoxelLightMap::propagate_all(uint8_t *p_light_data, const uint8_t *p_blocks, const NeighborData &p_neighbors) {
-	propagate_sunlight(p_light_data, p_blocks, p_neighbors);
-	propagate_block_light(p_light_data, p_blocks, p_neighbors);
+void VoxelLightMap::propagate_all(uint8_t *p_light_data, const uint16_t *p_blocks, const NeighborData &p_neighbors, const uint8_t *p_opacity, const uint8_t *p_emission) {
+	propagate_sunlight(p_light_data, p_blocks, p_neighbors, p_opacity);
+	propagate_block_light(p_light_data, p_blocks, p_neighbors, p_opacity, p_emission);
 }
 
-void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint8_t *p_blocks, const NeighborData &p_neighbors) {
+void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint16_t *p_blocks, const NeighborData &p_neighbors, const uint8_t *p_opacity) {
 	LocalVector<LightNode> queue;
 
-	// Phase 1: Seed sunlight from above — columns with no solid block above get sunlight=15.
+	// Phase 1: Seed sunlight from above вЂ” columns with no solid block above get sunlight=15.
 	// Sunlight propagates straight down through transparent blocks without attenuation.
 	for (int z = 0; z < CZ; z++) {
 		for (int x = 0; x < CX; x++) {
 			for (int y = CY - 1; y >= 0; y--) {
-				VoxelBlockType type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(x, y, z)];
-				uint8_t opacity = VoxelBlockData::get_block_light_opacity(type);
+				int type = (int)p_blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+				uint8_t opacity = p_opacity[type];
 
 				if (opacity >= 15) {
-					break; // Fully opaque — no more sunlight below.
+					break; // Fully opaque вЂ” no more sunlight below.
 				}
 
 				if (opacity == 0) {
-					// Fully transparent — full sunlight passes through.
+					// Fully transparent вЂ” full sunlight passes through.
 					set_sun(p_light_data, x, y, z, 15);
 					// Add to queue for horizontal spread.
 					queue.push_back({ (int16_t)x, (int16_t)y, (int16_t)z, 15 });
 				} else {
-					// Partially transparent (e.g. water, leaves) — sunlight still drops.
+					// Partially transparent (e.g. water, leaves) вЂ” sunlight still drops.
 					// For downward propagation, reduce by opacity.
 					uint8_t above_sun = (y < CY - 1) ? get_sun(p_light_data, x, y + 1, z, p_neighbors) : 15;
 					int new_val = (int)above_sun - (int)opacity;
@@ -52,8 +52,8 @@ void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint8_t *p_b
 			for (int z = 0; z < CZ; z++) {
 				uint8_t nb_sun = (p_neighbors.light_px[VoxelTerrainGenerator::block_index(0, y, z)] >> 4) & 0x0F;
 				if (nb_sun > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(CX - 1, y, z)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(CX - 1, y, z)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_sun - 1 - (int)our_opacity;
 						if (new_val > (int)get_sun(p_light_data, CX - 1, y, z, p_neighbors)) {
@@ -69,8 +69,8 @@ void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint8_t *p_b
 			for (int z = 0; z < CZ; z++) {
 				uint8_t nb_sun = (p_neighbors.light_nx[VoxelTerrainGenerator::block_index(CX - 1, y, z)] >> 4) & 0x0F;
 				if (nb_sun > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(0, y, z)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(0, y, z)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_sun - 1 - (int)our_opacity;
 						if (new_val > (int)get_sun(p_light_data, 0, y, z, p_neighbors)) {
@@ -86,8 +86,8 @@ void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint8_t *p_b
 			for (int x = 0; x < CX; x++) {
 				uint8_t nb_sun = (p_neighbors.light_pz[VoxelTerrainGenerator::block_index(x, y, 0)] >> 4) & 0x0F;
 				if (nb_sun > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(x, y, CZ - 1)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(x, y, CZ - 1)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_sun - 1 - (int)our_opacity;
 						if (new_val > (int)get_sun(p_light_data, x, y, CZ - 1, p_neighbors)) {
@@ -103,8 +103,8 @@ void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint8_t *p_b
 			for (int x = 0; x < CX; x++) {
 				uint8_t nb_sun = (p_neighbors.light_nz[VoxelTerrainGenerator::block_index(x, y, CZ - 1)] >> 4) & 0x0F;
 				if (nb_sun > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(x, y, 0)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(x, y, 0)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_sun - 1 - (int)our_opacity;
 						if (new_val > (int)get_sun(p_light_data, x, y, 0, p_neighbors)) {
@@ -143,8 +143,8 @@ void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint8_t *p_b
 				continue;
 			}
 
-			VoxelBlockType nb_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(nx, ny, nz)];
-			uint8_t opacity = VoxelBlockData::get_block_light_opacity(nb_type);
+			int nb_type = (int)p_blocks[VoxelTerrainGenerator::block_index(nx, ny, nz)];
+			uint8_t opacity = p_opacity[nb_type];
 			if (opacity >= 15) {
 				continue;
 			}
@@ -170,15 +170,15 @@ void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint8_t *p_b
 	}
 }
 
-void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint8_t *p_blocks, const NeighborData &p_neighbors) {
+void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint16_t *p_blocks, const NeighborData &p_neighbors, const uint8_t *p_opacity, const uint8_t *p_emission) {
 	LocalVector<LightNode> queue;
 
 	// Seed from emissive blocks.
 	for (int y = 0; y < CY; y++) {
 		for (int z = 0; z < CZ; z++) {
 			for (int x = 0; x < CX; x++) {
-				VoxelBlockType type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(x, y, z)];
-				uint8_t emission = VoxelBlockData::get_block_emission(type);
+				int type = (int)p_blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+				uint8_t emission = p_emission[type];
 				if (emission > 0) {
 					set_blight(p_light_data, x, y, z, emission);
 					queue.push_back({ (int16_t)x, (int16_t)y, (int16_t)z, emission });
@@ -193,8 +193,8 @@ void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint8_t *
 			for (int z = 0; z < CZ; z++) {
 				uint8_t nb_bl = p_neighbors.light_px[VoxelTerrainGenerator::block_index(0, y, z)] & 0x0F;
 				if (nb_bl > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(CX - 1, y, z)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(CX - 1, y, z)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_bl - 1 - (int)our_opacity;
 						if (new_val > (int)get_blight(p_light_data, CX - 1, y, z, p_neighbors)) {
@@ -209,8 +209,8 @@ void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint8_t *
 			for (int z = 0; z < CZ; z++) {
 				uint8_t nb_bl = p_neighbors.light_nx[VoxelTerrainGenerator::block_index(CX - 1, y, z)] & 0x0F;
 				if (nb_bl > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(0, y, z)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(0, y, z)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_bl - 1 - (int)our_opacity;
 						if (new_val > (int)get_blight(p_light_data, 0, y, z, p_neighbors)) {
@@ -225,8 +225,8 @@ void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint8_t *
 			for (int x = 0; x < CX; x++) {
 				uint8_t nb_bl = p_neighbors.light_pz[VoxelTerrainGenerator::block_index(x, y, 0)] & 0x0F;
 				if (nb_bl > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(x, y, CZ - 1)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(x, y, CZ - 1)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_bl - 1 - (int)our_opacity;
 						if (new_val > (int)get_blight(p_light_data, x, y, CZ - 1, p_neighbors)) {
@@ -241,8 +241,8 @@ void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint8_t *
 			for (int x = 0; x < CX; x++) {
 				uint8_t nb_bl = p_neighbors.light_nz[VoxelTerrainGenerator::block_index(x, y, CZ - 1)] & 0x0F;
 				if (nb_bl > 1) {
-					VoxelBlockType our_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(x, y, 0)];
-					uint8_t our_opacity = VoxelBlockData::get_block_light_opacity(our_type);
+					int our_type = (int)p_blocks[VoxelTerrainGenerator::block_index(x, y, 0)];
+					uint8_t our_opacity = p_opacity[our_type];
 					if (our_opacity < 15) {
 						int new_val = (int)nb_bl - 1 - (int)our_opacity;
 						if (new_val > (int)get_blight(p_light_data, x, y, 0, p_neighbors)) {
@@ -273,8 +273,8 @@ void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint8_t *
 				continue;
 			}
 
-			VoxelBlockType nb_type = (VoxelBlockType)p_blocks[VoxelTerrainGenerator::block_index(nx, ny, nz)];
-			uint8_t opacity = VoxelBlockData::get_block_light_opacity(nb_type);
+			int nb_type = (int)p_blocks[VoxelTerrainGenerator::block_index(nx, ny, nz)];
+			uint8_t opacity = p_opacity[nb_type];
 			if (opacity >= 15) {
 				continue;
 			}
@@ -293,18 +293,18 @@ void VoxelLightMap::propagate_block_light(uint8_t *p_light_data, const uint8_t *
 	}
 }
 
-void VoxelLightMap::remove_and_repropagate_sunlight(uint8_t *p_light_data, const uint8_t *p_blocks, const NeighborData &p_neighbors) {
+void VoxelLightMap::remove_and_repropagate_sunlight(uint8_t *p_light_data, const uint16_t *p_blocks, const NeighborData &p_neighbors, const uint8_t *p_opacity) {
 	// Full recompute of sunlight: clear all sunlight, then propagate from scratch.
 	for (int i = 0; i < CX * CY * CZ; i++) {
 		p_light_data[i] = p_light_data[i] & 0x0F; // Keep block light, clear sunlight.
 	}
-	propagate_sunlight(p_light_data, p_blocks, p_neighbors);
+	propagate_sunlight(p_light_data, p_blocks, p_neighbors, p_opacity);
 }
 
-void VoxelLightMap::remove_and_repropagate_block_light(uint8_t *p_light_data, const uint8_t *p_blocks, const NeighborData &p_neighbors) {
+void VoxelLightMap::remove_and_repropagate_block_light(uint8_t *p_light_data, const uint16_t *p_blocks, const NeighborData &p_neighbors, const uint8_t *p_opacity, const uint8_t *p_emission) {
 	// Full recompute of block light: clear all block light, then propagate from scratch.
 	for (int i = 0; i < CX * CY * CZ; i++) {
 		p_light_data[i] = p_light_data[i] & 0xF0; // Keep sunlight, clear block light.
 	}
-	propagate_block_light(p_light_data, p_blocks, p_neighbors);
+	propagate_block_light(p_light_data, p_blocks, p_neighbors, p_opacity, p_emission);
 }

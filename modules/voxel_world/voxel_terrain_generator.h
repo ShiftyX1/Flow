@@ -1,7 +1,6 @@
 #pragma once
 
-#include "voxel_biome_registry.h"
-#include "voxel_block_data.h"
+#include "voxel_block_registry.h"
 
 #include "core/math/vector2.h"
 #include "core/templates/vector.h"
@@ -104,9 +103,7 @@ private:
 	int seed = 0;
 	int sea_level = 52; // Keep in sync with VoxelWorld::sea_level default.
 
-	Ref<VoxelBiomeRegistry> biome_registry;
-
-	// Biome data access (falls back to static tables when no registry is set).
+	// Biome data access (static tables only now).
 	int _get_biome_count() const;
 	BiomeParams _get_biome_params_at(int p_index) const;
 	Vector2 _get_biome_center_at(int p_index) const;
@@ -127,7 +124,7 @@ private:
 
 	bool _should_place_tree(int p_world_x, int p_world_z, int p_tree_density) const;
 	int _tree_trunk_height(int p_world_x, int p_world_z) const;
-	void _place_tree(uint8_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height) const;
+	void _place_tree(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height) const;
 
 public:
 	VoxelTerrainGenerator();
@@ -139,12 +136,10 @@ public:
 	void set_sea_level(int p_sea_level) { sea_level = p_sea_level; }
 	int get_sea_level() const { return sea_level; }
 
-	void set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry) { biome_registry = p_registry; }
-
 	// Returns the index of the dominant biome at the given world block coordinates.
 	int get_biome_index_at(int p_world_x, int p_world_z) const;
 
-	Vector<uint8_t> generate_chunk_data(int p_chunk_x, int p_chunk_z) const;
+	Vector<uint16_t> generate_chunk_data(int p_chunk_x, int p_chunk_z) const;
 	static _FORCE_INLINE_ int block_index(int p_x, int p_y, int p_z) {
 		return p_x + p_z * CHUNK_SIZE_X + p_y * CHUNK_SIZE_X * CHUNK_SIZE_Z;
 	}

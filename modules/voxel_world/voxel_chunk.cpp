@@ -7,22 +7,22 @@ VoxelChunk::VoxelChunk() {
 VoxelChunk::~VoxelChunk() {
 }
 
-VoxelBlockType VoxelChunk::get_block(int p_x, int p_y, int p_z) const {
+int VoxelChunk::get_block(int p_x, int p_y, int p_z) const {
 	if (p_x < 0 || p_x >= SIZE_X || p_y < 0 || p_y >= SIZE_Y || p_z < 0 || p_z >= SIZE_Z) {
 		return VOXEL_BLOCK_AIR;
 	}
-	return (VoxelBlockType)blocks[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)];
+	return (int)blocks[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)];
 }
 
-void VoxelChunk::set_block(int p_x, int p_y, int p_z, VoxelBlockType p_type) {
+void VoxelChunk::set_block(int p_x, int p_y, int p_z, int p_type) {
 	if (p_x < 0 || p_x >= SIZE_X || p_y < 0 || p_y >= SIZE_Y || p_z < 0 || p_z >= SIZE_Z) {
 		return;
 	}
-	blocks.write[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)] = (uint8_t)p_type;
+	blocks.write[VoxelTerrainGenerator::block_index(p_x, p_y, p_z)] = (uint16_t)p_type;
 }
 
-MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags, const VoxelMesher::NeighborBlocks &p_neighbors) {
-	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags, p_neighbors);
+MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, const VoxelMesher::NeighborBlocks &p_neighbors) {
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_neighbors);
 
 	if (surfaces.size() == 0) {
 		return nullptr;
@@ -45,7 +45,7 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 			mat->set_texture_filter(p_filter);
 
 			int btype = surfaces[i].block_type;
-			if (btype >= 0 && (p_alpha_block_flags & (1 << btype))) {
+			if (btype >= 0 && p_registry.is_valid() && p_registry->is_uses_alpha(btype)) {
 				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
 				mat->set_alpha_scissor_threshold(0.5f);
 			}
@@ -66,8 +66,8 @@ MeshInstance3D *VoxelChunk::build_mesh(float p_block_size, const Ref<Material> &
 	return mesh_instance;
 }
 
-void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, uint32_t p_alpha_block_flags, const VoxelMesher::NeighborBlocks &p_neighbors) {
-	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_alpha_block_flags, p_neighbors);
+void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_material, const Ref<VoxelBlockRegistry> &p_registry, BaseMaterial3D::TextureFilter p_filter, const VoxelMesher::NeighborBlocks &p_neighbors) {
+	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, p_block_size, p_registry, p_neighbors);
 
 	if (!mesh_instance) {
 		return;
@@ -96,7 +96,7 @@ void VoxelChunk::rebuild_mesh(float p_block_size, const Ref<Material> &p_materia
 			mat->set_texture_filter(p_filter);
 
 			int btype = surfaces[i].block_type;
-			if (btype >= 0 && (p_alpha_block_flags & (1 << btype))) {
+			if (btype >= 0 && p_registry.is_valid() && p_registry->is_uses_alpha(btype)) {
 				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
 				mat->set_alpha_scissor_threshold(0.5f);
 			}

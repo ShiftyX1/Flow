@@ -1,5 +1,6 @@
 #pragma once
 
+#include "voxel_biome_registry.h"
 #include "voxel_block_registry.h"
 #include "voxel_chunk.h"
 #include "voxel_light_map.h"
@@ -58,6 +59,7 @@ private:
 	WorldEnvironment *env_node = nullptr;
 
 	Ref<VoxelBlockRegistry> block_registry;
+	Ref<VoxelBiomeRegistry> biome_registry;
 
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
@@ -158,6 +160,9 @@ public:
 
 	void set_block_registry(const Ref<VoxelBlockRegistry> &p_registry);
 	Ref<VoxelBlockRegistry> get_block_registry() const;
+
+	void set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry);
+	Ref<VoxelBiomeRegistry> get_biome_registry() const;
 
 	void set_verbose_logging(bool p_enabled) { verbose_logging = p_enabled; }
 	bool get_verbose_logging() const { return verbose_logging; }

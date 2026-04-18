@@ -1,30 +1,31 @@
 #pragma once
 
+#include "voxel_biome_registry.h"
 #include "voxel_block_registry.h"
 
 #include "core/math/vector2.h"
 #include "core/templates/vector.h"
 #include "modules/noise/fastnoise_lite.h"
 
-// ---- Biome system ----
-
-enum BiomeType : uint8_t {
-	BIOME_DESERT = 0,
-	BIOME_MEADOW,
-	BIOME_FOREST,
-	BIOME_MOUNTAINS,
-	BIOME_MAX
-};
+// ---- Runtime biome data (populated from VoxelBiomeRegistry) ----
 
 struct BiomeParams {
-	float height_base; // Additive offset to BASE_HEIGHT.
-	float height_scale; // Multiplier for continentalness contribution.
-	float detail_scale; // Multiplier for erosion contribution.
-	float density_3d_weight; // How much 3D noise affects terrain shape.
-	uint8_t surface_block; // Top block type.
-	uint8_t subsurface_block; // Blocks below surface (depth 1-4).
-	int tree_density; // Hash modulus for tree placement (lower = denser, 0 = no trees).
-	int snow_line; // Y-level above which snow replaces surface block.
+	float height_base = 0.0f;
+	float height_scale = 15.0f;
+	float detail_scale = 3.0f;
+	float density_3d_weight = 0.5f;
+	uint16_t surface_block = 1;
+	uint16_t subsurface_block = 2;
+	uint16_t shore_block = 4;
+	uint16_t snow_block = 6;
+	int snow_line = 165;
+	// Features (copied from registry at init time).
+	Vector<VoxelBiomeRegistry::FeatureConfig> features;
+};
+
+struct RuntimeBiomeData {
+	BiomeParams params;
+	Vector2 center; // (temperature, humidity) in [-1, 1].
 };
 
 class VoxelTerrainGenerator {
@@ -33,14 +34,8 @@ public:
 	static const int CHUNK_SIZE_Y = 192;
 	static const int CHUNK_SIZE_Z = 16;
 
-	// Maximum number of biomes supported when using a VoxelBiomeRegistry.
+	// Maximum number of biomes supported.
 	static const int MAX_BIOMES = 64;
-
-	// Tree generation constants.
-	static const int TREE_CHECK_BORDER = 4;
-	static const int TREE_MIN_TRUNK = 4;
-	static const int TREE_MAX_TRUNK = 6;
-	static const int TREE_CANOPY_RADIUS = 2;
 
 	// 3D density terrain constants (defaults, overridden per-biome).
 	static constexpr float BASE_HEIGHT = 64.0f;
@@ -72,11 +67,15 @@ public:
 	// Below this threshold (genuine transition zone) probabilistic mixing is applied.
 	static constexpr float BIOME_DITHER_THRESHOLD = 0.30f;
 
+	// Tree generation border for cross-chunk canopy.
+	static const int TREE_CHECK_BORDER = 4;
+
 	// Biome lookup tables.
-	static const BiomeParams BIOME_TABLE[BIOME_MAX];
-	static const Vector2 BIOME_CENTERS[BIOME_MAX]; // Ideal (temperature, humidity) per biome.
+	// (no longer static — populated at runtime from VoxelBiomeRegistry or defaults)
 
 private:
+	// Runtime biome data (set via set_biome_data or default fallback).
+	Vector<RuntimeBiomeData> runtime_biomes;
 	// 2D continentalness — base terrain height (OpenSimplex2, low freq).
 	Ref<FastNoiseLite> continentalness_noise;
 	// 2D erosion — terrain roughness / detail (OpenSimplex2, medium freq).
@@ -101,9 +100,9 @@ private:
 	Ref<FastNoiseLite> humidity_noise;
 
 	int seed = 0;
-	int sea_level = 52; // Keep in sync with VoxelWorld::sea_level default.
+	int sea_level = 52;
 
-	// Biome data access (static tables only now).
+	// Runtime biome data access.
 	int _get_biome_count() const;
 	BiomeParams _get_biome_params_at(int p_index) const;
 	Vector2 _get_biome_center_at(int p_index) const;
@@ -122,9 +121,12 @@ private:
 	float _get_lake_bank_factor(int p_world_x, int p_world_z) const;
 	int _get_local_water_level(int p_world_x, int p_world_z) const;
 
-	bool _should_place_tree(int p_world_x, int p_world_z, int p_tree_density) const;
-	int _tree_trunk_height(int p_world_x, int p_world_z) const;
-	void _place_tree(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height) const;
+	bool _should_place_feature(int p_world_x, int p_world_z, int p_density, int p_feature_salt) const;
+	int _tree_trunk_height(int p_world_x, int p_world_z, int p_min_trunk, int p_max_trunk) const;
+	void _place_tree_sphere(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height, int p_canopy_radius, uint16_t p_trunk_block, uint16_t p_canopy_block) const;
+	void _place_tree_cone(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height, int p_canopy_radius, uint16_t p_trunk_block, uint16_t p_canopy_block) const;
+	void _place_tree_bush(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height, int p_canopy_radius, uint16_t p_trunk_block, uint16_t p_canopy_block) const;
+	void _place_scatter(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, uint16_t p_block) const;
 
 public:
 	VoxelTerrainGenerator();
@@ -135,6 +137,11 @@ public:
 
 	void set_sea_level(int p_sea_level) { sea_level = p_sea_level; }
 	int get_sea_level() const { return sea_level; }
+
+	// Set biome data from a VoxelBiomeRegistry. Call before generating chunks.
+	void set_biome_data(const Vector<RuntimeBiomeData> &p_biomes);
+	// Populate default 4 biomes (fallback if no registry provided).
+	void setup_default_biomes();
 
 	// Returns the index of the dominant biome at the given world block coordinates.
 	int get_biome_index_at(int p_world_x, int p_world_z) const;

@@ -27,6 +27,9 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_block_registry", "registry"), &VoxelWorld::set_block_registry);
 	ClassDB::bind_method(D_METHOD("get_block_registry"), &VoxelWorld::get_block_registry);
 
+	ClassDB::bind_method(D_METHOD("set_biome_registry", "registry"), &VoxelWorld::set_biome_registry);
+	ClassDB::bind_method(D_METHOD("get_biome_registry"), &VoxelWorld::get_biome_registry);
+
 	ClassDB::bind_method(D_METHOD("set_verbose_logging", "enabled"), &VoxelWorld::set_verbose_logging);
 	ClassDB::bind_method(D_METHOD("get_verbose_logging"), &VoxelWorld::get_verbose_logging);
 
@@ -76,6 +79,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sea_level", PROPERTY_HINT_RANGE, "0,191,1"), "set_sea_level", "get_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
 
 	ADD_GROUP("Chunk Borders", "chunk_border_");
@@ -153,6 +157,14 @@ void VoxelWorld::set_block_registry(const Ref<VoxelBlockRegistry> &p_registry) {
 
 Ref<VoxelBlockRegistry> VoxelWorld::get_block_registry() const {
 	return block_registry;
+}
+
+void VoxelWorld::set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry) {
+	biome_registry = p_registry;
+}
+
+Ref<VoxelBiomeRegistry> VoxelWorld::get_biome_registry() const {
+	return biome_registry;
 }
 
 // --- Day/Night Cycle setters ---
@@ -572,6 +584,41 @@ void VoxelWorld::_initialize_world() {
 	}
 	generator->set_seed(effective_seed);
 	generator->set_sea_level(sea_level);
+
+	// If a biome registry is set, convert its biomes to runtime data for the generator.
+	if (biome_registry.is_valid() && biome_registry->get_biome_count() > 0) {
+		const Vector<VoxelBiomeRegistry::BiomeEntry> &entries = biome_registry->get_biomes();
+		Vector<RuntimeBiomeData> runtime_biomes;
+		runtime_biomes.resize(entries.size());
+
+		for (int i = 0; i < entries.size(); i++) {
+			const VoxelBiomeRegistry::BiomeEntry &be = entries[i];
+			RuntimeBiomeData &bd = runtime_biomes.write[i];
+			bd.params.height_base = be.height_base;
+			bd.params.height_scale = be.height_scale;
+			bd.params.detail_scale = be.detail_scale;
+			bd.params.density_3d_weight = be.density_3d_weight;
+			bd.params.surface_block = (uint16_t)be.surface_block;
+			bd.params.subsurface_block = (uint16_t)be.subsurface_block;
+			bd.params.shore_block = (uint16_t)be.shore_block;
+			bd.params.snow_block = (uint16_t)be.snow_block;
+			bd.params.snow_line = be.snow_line;
+			bd.params.features = be.features;
+			bd.center = Vector2(be.temperature, be.humidity);
+		}
+
+		generator->set_biome_data(runtime_biomes);
+
+		if (verbose_logging) {
+			print_line("[VoxelWorld] Loaded " + itos(entries.size()) + " biomes from registry.");
+		}
+	} else {
+		// No registry or empty → use built-in defaults.
+		generator->setup_default_biomes();
+		if (verbose_logging) {
+			print_line("[VoxelWorld] No biome registry set — using default 4 biomes.");
+		}
+	}
 
 	if (verbose_logging) {
 		print_line("[VoxelWorld] Seed: " + itos(effective_seed) + ", sea_level: " + itos(sea_level) + ", block_size: " + rtos(block_size) + ", load_radius: " + itos(chunk_load_radius));
@@ -1332,9 +1379,12 @@ String VoxelWorld::get_biome_name_at(const Vector3 &p_world_pos) const {
 	if (index < 0) {
 		return String("Unknown");
 	}
-	// Fallback names for the four built-in static biomes.
-	static const char *fallback_names[] = { "Desert", "Meadow", "Forest", "Mountains" };
-	if (index < 4) {
+	if (biome_registry.is_valid() && index < biome_registry->get_biome_count()) {
+		return biome_registry->get_biome_name(index);
+	}
+	// Fallback names for the built-in default biome.
+	static const char *fallback_names[] = { "Meadow" };
+	if (index < 1) {
 		return String(fallback_names[index]);
 	}
 	return String("Biome_") + itos(index);

@@ -2,6 +2,7 @@
 
 #include "register_types.h"
 
+#include "voxel_biome_registry.h"
 #include "voxel_block_registry.h"
 #include "voxel_world.h"
 
@@ -14,6 +15,7 @@
 
 void initialize_voxel_world_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+		GDREGISTER_CLASS(VoxelBiomeRegistry);
 		GDREGISTER_CLASS(VoxelBlockRegistry);
 		GDREGISTER_CLASS(VoxelWorld);
 	}

@@ -13,26 +13,15 @@ static _FORCE_INLINE_ uint32_t _hash_u32(uint32_t x) {
 }
 
 // ===========================================================================
-// Biome parameter tables
+// Biome parameter tables — populated at runtime via set_biome_data().
 // ===========================================================================
 
-//  height_base  height_scale  detail_scale  density_3d  surface             subsurface          tree_density  snow_line
-const BiomeParams VoxelTerrainGenerator::BIOME_TABLE[BIOME_MAX] = {
-	/* DESERT    */ { 0.0f,  8.0f,  1.0f,  0.3f, VOXEL_BLOCK_SAND,  VOXEL_BLOCK_STONE,  0,   999 },
-	/* MEADOW    */ { 0.0f, 15.0f,  3.0f,  0.5f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  400, 165 },
-	/* FOREST    */ { 2.0f, 18.0f,  3.0f,  0.8f, VOXEL_BLOCK_GRASS, VOXEL_BLOCK_DIRT,  15,   165 },
-	/* MOUNTAINS */ { 20.0f, 45.0f, 12.0f, 2.5f, VOXEL_BLOCK_STONE, VOXEL_BLOCK_STONE, 700, 70 },
-};
-
-// Biome centers in (temperature, humidity) space. Noise outputs are in [-1, 1].
-const Vector2 VoxelTerrainGenerator::BIOME_CENTERS[BIOME_MAX] = {
-	/* DESERT    */ Vector2(0.8f, -0.6f), // Hot, dry.
-	/* MEADOW    */ Vector2(0.2f, 0.0f), // Moderate temp, moderate humidity.
-	/* FOREST    */ Vector2(0.0f, 0.6f), // Cool, humid.
-	/* MOUNTAINS */ Vector2(-0.6f, 0.0f), // Cold, any humidity.
-};
+// (Removed static BIOME_TABLE and BIOME_CENTERS — now in runtime_biomes.)
 
 VoxelTerrainGenerator::VoxelTerrainGenerator() {
+	// Populate default biomes (will be overwritten if VoxelBiomeRegistry is provided).
+	setup_default_biomes();
+
 	// --- 2D continentalness: base terrain height (OpenSimplex2, low frequency). ---
 	continentalness_noise.instantiate();
 	continentalness_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
@@ -177,15 +166,58 @@ int VoxelTerrainGenerator::get_biome_index_at(int p_world_x, int p_world_z) cons
 // ===========================================================================
 
 int VoxelTerrainGenerator::_get_biome_count() const {
-	return (int)BIOME_MAX;
+	return runtime_biomes.size();
 }
 
 BiomeParams VoxelTerrainGenerator::_get_biome_params_at(int p_index) const {
-	return BIOME_TABLE[p_index < (int)BIOME_MAX ? p_index : 0];
+	if (p_index >= 0 && p_index < runtime_biomes.size()) {
+		return runtime_biomes[p_index].params;
+	}
+	return BiomeParams();
 }
 
 Vector2 VoxelTerrainGenerator::_get_biome_center_at(int p_index) const {
-	return BIOME_CENTERS[p_index < (int)BIOME_MAX ? p_index : 0];
+	if (p_index >= 0 && p_index < runtime_biomes.size()) {
+		return runtime_biomes[p_index].center;
+	}
+	return Vector2();
+}
+
+// ===========================================================================
+// set_biome_data / setup_default_biomes
+// ===========================================================================
+
+void VoxelTerrainGenerator::set_biome_data(const Vector<RuntimeBiomeData> &p_biomes) {
+	runtime_biomes = p_biomes;
+}
+
+void VoxelTerrainGenerator::setup_default_biomes() {
+	runtime_biomes.clear();
+
+	// Single default biome: Meadow.
+	{
+		RuntimeBiomeData bd;
+		bd.params.height_base = 0.0f;
+		bd.params.height_scale = 15.0f;
+		bd.params.detail_scale = 3.0f;
+		bd.params.density_3d_weight = 0.5f;
+		bd.params.surface_block = VOXEL_BLOCK_GRASS;
+		bd.params.subsurface_block = VOXEL_BLOCK_DIRT;
+		bd.params.shore_block = VOXEL_BLOCK_SAND;
+		bd.params.snow_block = VOXEL_BLOCK_SNOW;
+		bd.params.snow_line = 165;
+		bd.center = Vector2(0.0f, 0.0f);
+
+		VoxelBiomeRegistry::FeatureConfig tree;
+		tree.type = VoxelBiomeRegistry::FeatureConfig::FEATURE_TREE;
+		tree.trunk_block = VOXEL_BLOCK_WOOD;
+		tree.canopy_block = VOXEL_BLOCK_LEAVES;
+		tree.density = 400;
+		tree.canopy_shape = VoxelBiomeRegistry::CANOPY_SPHERE;
+		bd.params.features.push_back(tree);
+
+		runtime_biomes.push_back(bd);
+	}
 }
 
 // ===========================================================================
@@ -245,12 +277,10 @@ BiomeParams VoxelTerrainGenerator::_get_blended_params(const float *p_weights, i
 	BiomeParams dominant_bp = _get_biome_params_at(dominant);
 	result.surface_block = dominant_bp.surface_block;
 	result.subsurface_block = dominant_bp.subsurface_block;
+	result.shore_block = dominant_bp.shore_block;
+	result.snow_block = dominant_bp.snow_block;
 	result.snow_line = (int)snow_line_f;
-	// tree_density is a hash modulus (lower = denser), so linear averaging
-	// produces wrong results: forest=8 blended with meadow=400 yields ~47
-	// even at 90% forest weight, making forests 6x sparser than intended.
-	// Use the dominant biome's value directly instead.
-	result.tree_density = dominant_bp.tree_density;
+	result.features = dominant_bp.features;
 
 	return result;
 }
@@ -382,32 +412,38 @@ int VoxelTerrainGenerator::_get_local_water_level(int p_world_x, int p_world_z) 
 
 // --- Tree helpers ---
 
-bool VoxelTerrainGenerator::_should_place_tree(int p_world_x, int p_world_z, int p_tree_density) const {
-	if (p_tree_density <= 0) {
+bool VoxelTerrainGenerator::_should_place_feature(int p_world_x, int p_world_z, int p_density, int p_feature_salt) const {
+	if (p_density <= 0) {
 		return false;
 	}
-	uint32_t h = _hash_u32((uint32_t)seed ^ ((uint32_t)p_world_x * 73856093U) ^ ((uint32_t)p_world_z * 19349663U));
-	return ((int)(h % (uint32_t)p_tree_density)) == 0;
+	uint32_t h = _hash_u32((uint32_t)(seed + p_feature_salt) ^ ((uint32_t)p_world_x * 73856093U) ^ ((uint32_t)p_world_z * 19349663U));
+	return ((int)(h % (uint32_t)p_density)) == 0;
 }
 
-int VoxelTerrainGenerator::_tree_trunk_height(int p_world_x, int p_world_z) const {
+int VoxelTerrainGenerator::_tree_trunk_height(int p_world_x, int p_world_z, int p_min_trunk, int p_max_trunk) const {
 	uint32_t h = _hash_u32((uint32_t)(seed + 7777) ^ ((uint32_t)p_world_x * 83492791U) ^ ((uint32_t)p_world_z * 29560117U));
-	return TREE_MIN_TRUNK + (int)(h % (TREE_MAX_TRUNK - TREE_MIN_TRUNK + 1));
+	int range = p_max_trunk - p_min_trunk + 1;
+	if (range <= 0) {
+		return p_min_trunk;
+	}
+	return p_min_trunk + (int)(h % (uint32_t)range);
 }
 
-void VoxelTerrainGenerator::_place_tree(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height) const {
+void VoxelTerrainGenerator::_place_tree_sphere(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height, int p_canopy_radius, uint16_t p_trunk_block, uint16_t p_canopy_block) const {
 	int trunk_top = p_surface_y + p_trunk_height;
 
+	// Trunk.
 	for (int y = p_surface_y + 1; y <= trunk_top; y++) {
 		if (p_local_x >= 0 && p_local_x < CHUNK_SIZE_X &&
 				p_local_z >= 0 && p_local_z < CHUNK_SIZE_Z &&
 				y >= 0 && y < CHUNK_SIZE_Y) {
-			p_blocks[block_index(p_local_x, y, p_local_z)] = VOXEL_BLOCK_WOOD;
+			p_blocks[block_index(p_local_x, y, p_local_z)] = p_trunk_block;
 		}
 	}
 
+	// Canopy: sphere with clipped corners.
 	int canopy_center_y = trunk_top;
-	int r = TREE_CANOPY_RADIUS;
+	int r = p_canopy_radius;
 
 	for (int dy = -1; dy <= r; dy++) {
 		int layer_r = r;
@@ -432,9 +468,126 @@ void VoxelTerrainGenerator::_place_tree(uint16_t *p_blocks, int p_local_x, int p
 
 				int idx = block_index(lx, ly, lz);
 				if (p_blocks[idx] == VOXEL_BLOCK_AIR) {
-					p_blocks[idx] = VOXEL_BLOCK_LEAVES;
+					p_blocks[idx] = p_canopy_block;
 				}
 			}
+		}
+	}
+}
+
+void VoxelTerrainGenerator::_place_tree_cone(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height, int p_canopy_radius, uint16_t p_trunk_block, uint16_t p_canopy_block) const {
+	int trunk_top = p_surface_y + p_trunk_height;
+
+	// Trunk.
+	for (int y = p_surface_y + 1; y <= trunk_top; y++) {
+		if (p_local_x >= 0 && p_local_x < CHUNK_SIZE_X &&
+				p_local_z >= 0 && p_local_z < CHUNK_SIZE_Z &&
+				y >= 0 && y < CHUNK_SIZE_Y) {
+			p_blocks[block_index(p_local_x, y, p_local_z)] = p_trunk_block;
+		}
+	}
+
+	// Cone canopy: widest at bottom, tapers to top.
+	int canopy_height = p_canopy_radius * 2 + 1;
+	int canopy_start = trunk_top - 1;
+
+	for (int dy = 0; dy < canopy_height; dy++) {
+		int ly = canopy_start + dy;
+		if (ly < 0 || ly >= CHUNK_SIZE_Y) {
+			continue;
+		}
+
+		// Layer radius tapers linearly from max at bottom to 0 at top.
+		int layer_r = p_canopy_radius - (dy * p_canopy_radius / canopy_height);
+		if (layer_r < 0) {
+			layer_r = 0;
+		}
+
+		for (int dx = -layer_r; dx <= layer_r; dx++) {
+			for (int dz = -layer_r; dz <= layer_r; dz++) {
+				// Skip corners for more natural shape.
+				if (abs(dx) == layer_r && abs(dz) == layer_r && layer_r > 1) {
+					continue;
+				}
+
+				int lx = p_local_x + dx;
+				int lz = p_local_z + dz;
+
+				if (lx < 0 || lx >= CHUNK_SIZE_X || lz < 0 || lz >= CHUNK_SIZE_Z) {
+					continue;
+				}
+
+				int idx = block_index(lx, ly, lz);
+				if (p_blocks[idx] == VOXEL_BLOCK_AIR) {
+					p_blocks[idx] = p_canopy_block;
+				}
+			}
+		}
+	}
+
+	// Tip: single block on top.
+	int tip_y = canopy_start + canopy_height;
+	if (p_local_x >= 0 && p_local_x < CHUNK_SIZE_X &&
+			p_local_z >= 0 && p_local_z < CHUNK_SIZE_Z &&
+			tip_y >= 0 && tip_y < CHUNK_SIZE_Y) {
+		int idx = block_index(p_local_x, tip_y, p_local_z);
+		if (p_blocks[idx] == VOXEL_BLOCK_AIR) {
+			p_blocks[idx] = p_canopy_block;
+		}
+	}
+}
+
+void VoxelTerrainGenerator::_place_tree_bush(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, int p_trunk_height, int p_canopy_radius, uint16_t p_trunk_block, uint16_t p_canopy_block) const {
+	// Bush: very short trunk (1 block hidden inside canopy), wide canopy.
+	int trunk_top = p_surface_y + 1;
+
+	// Minimal trunk.
+	if (p_local_x >= 0 && p_local_x < CHUNK_SIZE_X &&
+			p_local_z >= 0 && p_local_z < CHUNK_SIZE_Z &&
+			trunk_top >= 0 && trunk_top < CHUNK_SIZE_Y) {
+		p_blocks[block_index(p_local_x, trunk_top, p_local_z)] = p_trunk_block;
+	}
+
+	// Wide, short canopy: 2 layers tall, radius from feature.
+	int r = p_canopy_radius;
+	for (int dy = 0; dy <= 1; dy++) {
+		int ly = trunk_top + dy;
+		if (ly < 0 || ly >= CHUNK_SIZE_Y) {
+			continue;
+		}
+
+		int layer_r = (dy == 0) ? r : r - 1;
+
+		for (int dx = -layer_r; dx <= layer_r; dx++) {
+			for (int dz = -layer_r; dz <= layer_r; dz++) {
+				if (abs(dx) == layer_r && abs(dz) == layer_r) {
+					continue;
+				}
+
+				int lx = p_local_x + dx;
+				int lz = p_local_z + dz;
+
+				if (lx < 0 || lx >= CHUNK_SIZE_X || lz < 0 || lz >= CHUNK_SIZE_Z) {
+					continue;
+				}
+
+				int idx = block_index(lx, ly, lz);
+				if (p_blocks[idx] == VOXEL_BLOCK_AIR) {
+					p_blocks[idx] = p_canopy_block;
+				}
+			}
+		}
+	}
+}
+
+void VoxelTerrainGenerator::_place_scatter(uint16_t *p_blocks, int p_local_x, int p_surface_y, int p_local_z, uint16_t p_block) const {
+	int y = p_surface_y + 1;
+	if (p_local_x >= 0 && p_local_x < CHUNK_SIZE_X &&
+			p_local_z >= 0 && p_local_z < CHUNK_SIZE_Z &&
+			y >= 0 && y < CHUNK_SIZE_Y) {
+		int idx = block_index(p_local_x, y, p_local_z);
+		if (p_blocks[idx] == VOXEL_BLOCK_AIR) {
+			p_blocks[idx] = p_block;
 		}
 	}
 }
@@ -646,18 +799,18 @@ Vector<uint16_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p
 				if (depth == 0) {
 					// Surface block вЂ” biome-dependent.
 					if (is_water_body || sh <= wl) {
-						blocks_w[idx] = VOXEL_BLOCK_SAND;
+						blocks_w[idx] = bp.shore_block;
 					} else if (sh <= wl + BEACH_HEIGHT && flat_shore) {
-						blocks_w[idx] = VOXEL_BLOCK_SAND; // Flat shore / beach.
+						blocks_w[idx] = bp.shore_block; // Flat shore / beach.
 					} else if (sh > bp.snow_line) {
-						blocks_w[idx] = VOXEL_BLOCK_SNOW;
+						blocks_w[idx] = bp.snow_block;
 					} else {
 						blocks_w[idx] = bp.surface_block;
 					}
 				} else if (depth <= 4) {
-					// Subsurface вЂ” biome-dependent.
+					// Subsurface — biome-dependent.
 					if (is_water_body || (sh <= wl + BEACH_HEIGHT && flat_shore)) {
-						blocks_w[idx] = VOXEL_BLOCK_SAND;
+						blocks_w[idx] = bp.shore_block;
 					} else {
 						blocks_w[idx] = bp.subsurface_block;
 					}
@@ -713,20 +866,16 @@ Vector<uint16_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p
 		}
 	}
 
-	// --- Pass 4: Tree generation (biome-aware density) ---
+	// --- Pass 4: Feature generation (biome-aware: trees, scatter, etc.) ---
 	int border = TREE_CHECK_BORDER;
 	for (int wx = world_x_start - border; wx < world_x_start + CHUNK_SIZE_X + border; wx++) {
 		for (int wz = world_z_start - border; wz < world_z_start + CHUNK_SIZE_Z + border; wz++) {
-			// Get biome tree density for this column.
+			// Get biome params for this column.
 			float weights[MAX_BIOMES] = {};
 			_get_biome_weights(wx, wz, weights, biome_count);
 			BiomeParams bp = _get_blended_params(weights, biome_count);
 
-			if (!_should_place_tree(wx, wz, bp.tree_density)) {
-				continue;
-			}
-
-			// Skip trees in water bodies, river banks, and lake banks.
+			// Skip features in water bodies, river banks, and lake banks.
 			float rf = _get_river_factor(wx, wz);
 			float rbf = _get_river_bank_factor(wx, wz);
 			float lf = _get_lake_factor(wx, wz);
@@ -745,13 +894,43 @@ Vector<uint16_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p
 				sh = _find_surface_y(wx, wz, bp);
 			}
 
-			// Only place trees above sea level + beach, below biome snow line.
+			// Only place features above sea level + beach, below biome snow line.
 			if (sh <= sea_level + 2 || sh > bp.snow_line) {
 				continue;
 			}
 
-			int trunk_height = _tree_trunk_height(wx, wz);
-			_place_tree(blocks_w, local_x, sh, local_z, trunk_height);
+			// Iterate features for this biome.
+			for (int fi = 0; fi < bp.features.size(); fi++) {
+				const VoxelBiomeRegistry::FeatureConfig &fc = bp.features[fi];
+
+				if (!_should_place_feature(wx, wz, fc.density, fi * 1000)) {
+					continue;
+				}
+
+				if (fc.type == VoxelBiomeRegistry::FeatureConfig::FEATURE_TREE) {
+					// Tree features only within extended border (for cross-chunk canopies).
+					int trunk_height = _tree_trunk_height(wx, wz, fc.min_trunk, fc.max_trunk);
+
+					switch (fc.canopy_shape) {
+						case VoxelBiomeRegistry::CANOPY_CONE:
+							_place_tree_cone(blocks_w, local_x, sh, local_z, trunk_height, fc.canopy_radius, (uint16_t)fc.trunk_block, (uint16_t)fc.canopy_block);
+							break;
+						case VoxelBiomeRegistry::CANOPY_BUSH:
+							_place_tree_bush(blocks_w, local_x, sh, local_z, trunk_height, fc.canopy_radius, (uint16_t)fc.trunk_block, (uint16_t)fc.canopy_block);
+							break;
+						default: // CANOPY_SPHERE
+							_place_tree_sphere(blocks_w, local_x, sh, local_z, trunk_height, fc.canopy_radius, (uint16_t)fc.trunk_block, (uint16_t)fc.canopy_block);
+							break;
+					}
+				} else if (fc.type == VoxelBiomeRegistry::FeatureConfig::FEATURE_SCATTER) {
+					// Scatter: only inside chunk bounds (no border needed).
+					if (local_x >= 0 && local_x < CHUNK_SIZE_X && local_z >= 0 && local_z < CHUNK_SIZE_Z) {
+						if (sh >= fc.min_y && sh <= fc.max_y) {
+							_place_scatter(blocks_w, local_x, sh, local_z, (uint16_t)fc.block);
+						}
+					}
+				}
+			}
 		}
 	}
 

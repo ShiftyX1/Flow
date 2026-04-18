@@ -14,27 +14,33 @@
    - [VoxelBlockType Enum](#voxelblocktype-enum)
    - [VoxelBlockData (Thread-safe Cache)](#voxelblockdata-thread-safe-cache)
    - [VoxelBlockRegistry (Source of Truth)](#voxelblockregistry-source-of-truth)
-4. [Terrain Generation](#4-terrain-generation)
+4. [Biome System](#4-biome-system)
+   - [VoxelBiomeRegistry (Code-only API)](#voxelbiomeregistry-code-only-api)
+   - [Biome Properties](#biome-properties)
+   - [Feature System](#feature-system)
+   - [Biome Blending](#biome-blending)
+5. [Terrain Generation](#5-terrain-generation)
    - [VoxelTerrainGenerator](#voxelterraingenerator)
-   - [Biome System](#biome-system)
-5. [Chunk Management](#5-chunk-management)
+   - [Noise Layers](#noise-layers)
+6. [Chunk Management](#6-chunk-management)
    - [VoxelChunk](#voxelchunk)
    - [Loading & Unloading](#loading--unloading)
-6. [Lighting System](#6-lighting-system)
+7. [Lighting System](#7-lighting-system)
    - [Sunlight BFS](#sunlight-bfs)
    - [Block Light (OmniLight3D)](#block-light-omnilight3d)
    - [VoxelLightMap](#voxellightmap)
-7. [Meshing](#7-meshing)
+8. [Meshing](#8-meshing)
    - [VoxelMesher](#voxelmesher)
    - [Vertex Format & Shader](#vertex-format--shader)
-8. [VoxelWorld Node (Main API)](#8-voxelworld-node-main-api)
+9. [VoxelWorld Node (Main API)](#9-voxelworld-node-main-api)
    - [Inspector Properties](#inspector-properties)
    - [GDScript API](#gdscript-api)
    - [Day/Night Cycle](#daynight-cycle)
    - [Fog System](#fog-system)
-9. [Editor Plugin](#9-editor-plugin)
-10. [Practical Guide](#10-practical-guide)
+10. [Editor Plugin](#10-editor-plugin)
+11. [Practical Guide](#11-practical-guide)
     - [Minimal Scene Setup](#minimal-scene-setup)
+    - [Configuring Biomes from GDScript](#configuring-biomes-from-gdscript)
     - [Adding a Custom Block Type](#adding-a-custom-block-type)
     - [GDScript Examples](#gdscript-examples)
 
@@ -45,6 +51,8 @@
 The **voxel_world** module adds a complete voxel engine to Flow. It provides:
 
 - Procedural infinite terrain with biome blending
+- **Data-driven biome system** — the engine handles math (noise, blending, caves, feature placement), while the game configures parameters via GDScript API
+- **Declarative feature system** for trees (sphere, cone, bush canopy shapes) and scatter blocks per biome
 - Multi-threaded chunk generation & meshing via `WorkerThreadPool`
 - BFS-based sunlight propagation with per-vertex ambient occlusion
 - Dynamic block light via Godot's `OmniLight3D` (with shadows)
@@ -52,6 +60,15 @@ The **voxel_world** module adds a complete voxel engine to Flow. It provides:
 - Day/night cycle with sun, moon, and environment control
 - Voxel-space raycasting and AABB-based collision (no `PhysicsServer` needed)
 - Editor plugin for graphical block registry editing
+
+### Design Philosophy
+
+The module follows a clear separation of concerns:
+
+- **Engine** (C++) — noise computation, biome weight blending, cave carving, feature placement algorithms, meshing, lighting
+- **Game** (GDScript) — biome definitions (terrain shape, block types, temperature/humidity, tree styles), block registry configuration
+
+The engine ships with a single default "Meadow" biome. Games add their own biomes (desert, forest, mountains, etc.) via the `VoxelBiomeRegistry` API.
 
 ---
 
@@ -66,10 +83,11 @@ The **voxel_world** module adds a complete voxel engine to Flow. It provides:
 ├───────────────┬───────────────┬───────────────────────────┤
 │ VoxelTerrain  │ VoxelBlock    │ VoxelBiome                │
 │ Generator     │ Registry      │ Registry                  │
-│  - Noise      │  - .tres      │  - .tres                  │
-│  - Biome      │  - Textures   │  - Biome params           │
-│    blending   │  - Physics    │  - Temperature/humidity    │
-│  - Caves      │  - Lighting   │  - Tree density            │
+│  - Noise      │  - Textures   │  - Code-only API          │
+│  - Biome      │  - Physics    │  - Biome params           │
+│    blending   │  - Lighting   │  - Climate position       │
+│  - Caves      │  - Shaders    │  - Features (trees,       │
+│  - Features   │               │    scatter)               │
 ├───────────────┴───────────────┴───────────────────────────┤
 │                    Per Chunk Pipeline                      │
 │  generate_chunk_data → propagate_sunlight → build_mesh    │
@@ -203,7 +221,156 @@ registry.setup_defaults()
 
 ---
 
-## 4. Terrain Generation
+## 4. Biome System
+
+### VoxelBiomeRegistry (Code-only API)
+
+`VoxelBiomeRegistry` is a `RefCounted` class (GDCLASS) that stores biome definitions. It is **not** a serializable resource — biomes are configured purely from code (GDScript or C++).
+
+**Key design decisions:**
+- The engine provides a single default biome ("Meadow") via `setup_defaults()`
+- Games add their own biomes by calling `add_biome()` with a Dictionary of properties
+- The registry is assigned to `VoxelWorld.biome_registry` before the world initializes
+- If no registry is set, the engine uses its built-in single-biome default
+
+**Lifecycle:**
+1. Game creates `VoxelBiomeRegistry.new()` in `_init()` of a script extending `VoxelWorld`
+2. Calls `setup_defaults()` to add the built-in Meadow biome
+3. Calls `add_biome()` for each additional biome (desert, forest, mountains, etc.)
+4. Assigns the registry: `biome_registry = reg`
+5. On `_ready()`, `VoxelWorld` converts biome entries to `RuntimeBiomeData` and passes them to the terrain generator
+
+**GDScript API:**
+
+```gdscript
+var reg = VoxelBiomeRegistry.new()
+
+# Built-in default (Meadow with trees).
+reg.setup_defaults()
+
+# Add a biome.
+var id: int = reg.add_biome("desert", {
+    "height_base": 0.0,
+    "height_scale": 8.0,
+    "detail_scale": 1.0,
+    "density_3d_weight": 0.3,
+    "temperature": 0.8,
+    "humidity": -0.6,
+    "surface_block": VoxelWorld.VOXEL_BLOCK_SAND,
+    "subsurface_block": VoxelWorld.VOXEL_BLOCK_STONE,
+    "shore_block": VoxelWorld.VOXEL_BLOCK_SAND,
+    "snow_block": VoxelWorld.VOXEL_BLOCK_SNOW,
+    "snow_line": 999,
+    "features": [
+        {
+            "type": "tree",
+            "trunk_block": VoxelWorld.VOXEL_BLOCK_WOOD,
+            "canopy_block": VoxelWorld.VOXEL_BLOCK_LEAVES,
+            "density": 700,
+            "canopy_shape": "cone",
+        }
+    ],
+})
+
+# Query.
+reg.get_biome_count()           # → int
+reg.get_biome_id("desert")      # → int (or -1)
+reg.get_biome_name(0)           # → String
+reg.has_biome(0)                # → bool
+
+# Per-biome property modification after creation.
+reg.set_biome_height_scale(id, 12.0)
+reg.set_biome_temperature(id, 0.5)
+reg.set_biome_surface_block(id, VoxelWorld.VOXEL_BLOCK_GRASS)
+
+# Feature management.
+reg.add_biome_feature(id, {"type": "scatter", "block": 10, "density": 200})
+reg.get_biome_feature_count(id)   # → int
+reg.get_biome_feature(id, 0)      # → Dictionary
+reg.clear_biome_features(id)
+
+# Remove biome (shifts IDs!).
+reg.remove_biome(id)
+reg.clear()
+```
+
+### Biome Properties
+
+Each biome has the following configurable properties:
+
+| Property            | Type   | Default | Description                                          |
+|---------------------|--------|---------|------------------------------------------------------|
+| `height_base`       | float  | 0.0     | Base height offset added to terrain                  |
+| `height_scale`      | float  | 15.0    | Amplitude of the continentalness noise               |
+| `detail_scale`      | float  | 3.0     | Amplitude of the detail/erosion noise                |
+| `density_3d_weight` | float  | 0.5     | How much 3D noise affects terrain (caves, overhangs) |
+| `temperature`       | float  | 0.0     | Position on temperature axis [-1, 1]                 |
+| `humidity`          | float  | 0.0     | Position on humidity axis [-1, 1]                    |
+| `surface_block`     | int    | 1       | Block ID for the top layer (e.g. grass)              |
+| `subsurface_block`  | int    | 2       | Block ID for layers below surface (e.g. dirt)        |
+| `shore_block`       | int    | 4       | Block ID for beach/shore areas (e.g. sand)           |
+| `snow_block`        | int    | 6       | Block ID placed above snow_line (e.g. snow)          |
+| `snow_line`         | int    | 165     | Y-level above which surface is replaced by snow      |
+
+**Climate space**: Biomes are placed in a 2D (temperature, humidity) space. The generator samples noise to get a climate point, then blends nearby biomes using Gaussian weighting (distance-based).
+
+### Feature System
+
+Each biome can have zero or more **features** — declarative descriptions of what to place on the terrain surface. Features are specified as an array of Dictionaries in the `"features"` key when calling `add_biome()`, or added later with `add_biome_feature()`.
+
+#### Tree Features
+
+Trees consist of a trunk column and a canopy (leaf volume) on top.
+
+| Key            | Type   | Default        | Description                              |
+|----------------|--------|----------------|------------------------------------------|
+| `type`         | String | —              | Must be `"tree"`                         |
+| `trunk_block`  | int    | 7 (Wood)       | Block ID for the trunk                   |
+| `canopy_block` | int    | 8 (Leaves)     | Block ID for the canopy/leaves           |
+| `density`      | int    | 0              | Hash modulus — lower = denser (0 = none) |
+| `min_trunk`    | int    | 4              | Minimum trunk height                     |
+| `max_trunk`    | int    | 6              | Maximum trunk height                     |
+| `canopy_radius`| int    | 2              | Radius of the canopy volume              |
+| `canopy_shape` | String | `"sphere"`     | One of: `"sphere"`, `"cone"`, `"bush"`   |
+
+**Canopy shapes:**
+
+- **`sphere`** — Classic round canopy. A sphere with clipped corners around the trunk top. Good for oak/deciduous trees.
+- **`cone`** — Spruce/pine shape. Tapered cone, wider at bottom and narrowing to a point. Each vertical layer reduces the radius.
+- **`bush`** — Wide, low canopy. Large horizontal spread with minimal height. Good for savanna/acacia-style trees.
+
+**Density**: The `density` value is a hash modulus. The engine hashes the world (x, z) coordinates and checks `hash % density == 0`. Lower values = more trees. Typical values: 15 (dense forest), 400 (sparse meadow), 700 (very sparse mountains). A value of 0 means the feature is disabled.
+
+#### Scatter Features
+
+Scatter places single blocks on the terrain surface (e.g. flowers, mushrooms, rocks).
+
+| Key            | Type   | Default | Description                                    |
+|----------------|--------|---------|------------------------------------------------|
+| `type`         | String | —       | Must be `"scatter"`                            |
+| `block`        | int    | 0       | Block ID to place                              |
+| `density`      | int    | 0       | Hash modulus — lower = denser (0 = none)       |
+| `min_y`        | int    | 0       | Minimum Y level for placement                  |
+| `max_y`        | int    | 192     | Maximum Y level for placement                  |
+| `surface_only` | bool   | true    | Only place on the terrain surface              |
+
+**Feature salt**: Each feature in a biome's feature array uses a unique hash salt (based on its index), ensuring different features don't always coincide at the same positions.
+
+### Biome Blending
+
+The terrain generator uses temperature and humidity noise to determine the climate at each column. Each biome has a center point in (temperature, humidity) space. Biome weights are computed as:
+
+```
+weight[i] = exp(-4.0 * distance_squared(climate_point, biome_center[i]))
+```
+
+Weights are normalized so they sum to 1.0. Terrain parameters (height, detail, density) are then **linearly interpolated** across all biomes using these weights. This creates smooth transitions.
+
+**Non-blendable parameters** (blocks, features, snow_line) come from the **dominant biome** — the one with the highest weight at that column.
+
+---
+
+## 5. Terrain Generation
 
 ### VoxelTerrainGenerator
 
@@ -211,10 +378,11 @@ Procedural terrain with 3D density-based generation.
 
 **Chunk dimensions**: 16×192×16 blocks (`CHUNK_SIZE_X/Y/Z`)
 
-**Noise layers**:
-- **Continentalness**: base terrain height variation
-- **Erosion**: detail-scale noise layered on top
-- **3D density**: caves, overhangs, floating islands
+### Noise Layers
+
+- **Continentalness**: base terrain height variation (2D, low frequency)
+- **Erosion**: detail-scale noise layered on top (2D)
+- **3D density**: caves, overhangs, floating islands (3D)
 - **Cave tunnels**: `abs(noise) < CAVE_THRESHOLD` → carved tunnel
 - **Cheese caves**: `noise > CAVE_CHEESE_THRESHOLD` → large chambers
 - **River noise**: creates river channels with banks
@@ -222,42 +390,25 @@ Procedural terrain with 3D density-based generation.
 
 **Key constants**:
 
-| Constant           | Value  | Description                                |
-|--------------------|--------|--------------------------------------------|
-| `BASE_HEIGHT`      | 64.0   | Default terrain height                     |
-| `CAVE_THRESHOLD`   | 0.16   | Tunnel carving threshold                   |
-| `CAVE_CHEESE_THRESHOLD` | 0.26 | Chamber carving threshold               |
-| `RIVER_WIDTH`      | 0.07   | River channel width                        |
-| `LAKE_THRESHOLD`   | 0.35   | Lake formation threshold                   |
-| `OCEAN_THRESHOLD`  | -0.2   | Ocean depth threshold                      |
-| `TREE_MIN_TRUNK`   | 4      | Minimum tree trunk height                  |
-| `TREE_MAX_TRUNK`   | 6      | Maximum tree trunk height                  |
-| `TREE_CANOPY_RADIUS`| 2     | Leaf canopy radius                         |
+| Constant                | Value | Description                            |
+|-------------------------|-------|----------------------------------------|
+| `BASE_HEIGHT`           | 64.0  | Default terrain height                 |
+| `CAVE_THRESHOLD`        | 0.16  | Tunnel carving threshold               |
+| `CAVE_CHEESE_THRESHOLD` | 0.26  | Chamber carving threshold              |
+| `RIVER_WIDTH`           | 0.07  | River channel width                    |
+| `LAKE_THRESHOLD`        | 0.35  | Lake formation threshold               |
+| `OCEAN_THRESHOLD`       | -0.2  | Ocean depth threshold                  |
 
-### Biome System
+**Generation passes** (per chunk):
 
-**Built-in biomes** (defined via `VoxelBiomeRegistry`):
-
-| Biome     | Surface | Subsurface | Tree Density | HBase | HScale |
-|-----------|---------|------------|--------------|-------|--------|
-| Desert    | Sand    | Sand       | 0 (none)     | 0.0   | 10.0   |
-| Meadow    | Grass   | Dirt       | 0            | 0.0   | 15.0   |
-| Forest    | Grass   | Dirt       | 60           | 0.0   | 15.0   |
-| Mountains | Stone   | Stone      | 0            | 10.0  | 30.0   |
-
-**VoxelBiomeData** (Resource, `.tres`):
-
-Each biome defines: `temperature_center`, `humidity_center` (position in climate space), terrain shape parameters (`height_base`, `height_scale`, `detail_scale`, `density_3d_weight`), `surface_block`, `subsurface_block`, `tree_density`, `snow_line`.
-
-**VoxelBiomeRegistry** (Resource, `.tres`):
-
-Collection of `VoxelBiomeData` entries. `setup_defaults()` populates four built-in biomes.
-
-Biome selection uses temperature/humidity noise → closest biome center via Voronoi-style weighted blending with dithering at borders (`BIOME_DITHER_THRESHOLD = 0.30`).
+1. **Pass 1**: Compute surface height for each (x, z) column using blended biome parameters
+2. **Pass 2**: Fill blocks — bedrock, subsurface, surface, snow, shore. Carve caves and fill water
+3. **Pass 3**: Sunlight propagation (BFS from top)
+4. **Pass 4**: Feature placement — iterate biome features for each column, place trees and scatter blocks
 
 ---
 
-## 5. Chunk Management
+## 6. Chunk Management
 
 ### VoxelChunk
 
@@ -285,7 +436,7 @@ Stores blocks and light data for one 16×192×16 column.
 
 ---
 
-## 6. Lighting System
+## 7. Lighting System
 
 ### Sunlight BFS
 
@@ -324,7 +475,7 @@ VoxelLightMap::remove_and_repropagate_sunlight(light_data, blocks, neighbors);
 
 ---
 
-## 7. Meshing
+## 8. Meshing
 
 ### VoxelMesher
 
@@ -381,7 +532,7 @@ void fragment() {
 
 ---
 
-## 8. VoxelWorld Node (Main API)
+## 9. VoxelWorld Node (Main API)
 
 ### Inspector Properties
 
@@ -460,7 +611,7 @@ Distance-based fog scaled to draw distance:
 
 ---
 
-## 9. Editor Plugin
+## 10. Editor Plugin
 
 The module registers an editor inspector plugin for `VoxelBlockRegistry` resources.
 
@@ -477,7 +628,7 @@ Access: Select a `VoxelBlockRegistry` resource in the inspector → click "Edit 
 
 ---
 
-## 10. Practical Guide
+## 11. Practical Guide
 
 ### Minimal Scene Setup
 
@@ -485,12 +636,91 @@ Access: Select a `VoxelBlockRegistry` resource in the inspector → click "Edit 
 2. Add a `VoxelWorld` child node
 3. Add a `Camera3D` as a child of `VoxelWorld` (the world tracks the active camera)
 4. (Optional) Create a `VoxelBlockRegistry` resource (`.tres`) and assign it
-5. (Optional) Create a `VoxelBiomeRegistry` resource (`.tres`) and assign it
+5. (Optional) Attach a script extending `VoxelWorld` that creates a `VoxelBiomeRegistry` and assigns it in `_init()`
 6. (Optional) Add `DirectionalLight3D` nodes for sun/moon and a `WorldEnvironment`
 7. Run the scene — terrain generates automatically
 
 If no `block_registry` is assigned, a default one is created with `setup_defaults()`.
-If no `biome_registry` is assigned, built-in biomes are used.
+If no `biome_registry` is assigned, a single default Meadow biome is used.
+
+### Configuring Biomes from GDScript
+
+Attach a script extending `VoxelWorld` to the VoxelWorld node. In `_init()` (which runs before `_ready()`), create and populate a `VoxelBiomeRegistry`:
+
+```gdscript
+extends VoxelWorld
+
+func _init() -> void:
+    var reg := VoxelBiomeRegistry.new()
+    reg.setup_defaults()  # Adds "meadow" (id 0)
+
+    # Desert — hot, dry, flat, no trees.
+    reg.add_biome("desert", {
+        "height_base": 0.0,
+        "height_scale": 8.0,
+        "detail_scale": 1.0,
+        "density_3d_weight": 0.3,
+        "temperature": 0.8,
+        "humidity": -0.6,
+        "surface_block": VoxelWorld.VOXEL_BLOCK_SAND,
+        "subsurface_block": VoxelWorld.VOXEL_BLOCK_STONE,
+        "shore_block": VoxelWorld.VOXEL_BLOCK_SAND,
+        "snow_block": VoxelWorld.VOXEL_BLOCK_SNOW,
+        "snow_line": 999,
+    })
+
+    # Forest — dense trees, lush.
+    reg.add_biome("forest", {
+        "height_base": 2.0,
+        "height_scale": 18.0,
+        "detail_scale": 3.0,
+        "density_3d_weight": 0.8,
+        "temperature": 0.0,
+        "humidity": 0.6,
+        "surface_block": VoxelWorld.VOXEL_BLOCK_GRASS,
+        "subsurface_block": VoxelWorld.VOXEL_BLOCK_DIRT,
+        "shore_block": VoxelWorld.VOXEL_BLOCK_SAND,
+        "snow_block": VoxelWorld.VOXEL_BLOCK_SNOW,
+        "snow_line": 165,
+        "features": [
+            {
+                "type": "tree",
+                "trunk_block": VoxelWorld.VOXEL_BLOCK_WOOD,
+                "canopy_block": VoxelWorld.VOXEL_BLOCK_LEAVES,
+                "density": 15,
+                "canopy_shape": "sphere",
+            }
+        ],
+    })
+
+    # Mountains — tall, rocky, sparse cone-shaped trees.
+    reg.add_biome("mountains", {
+        "height_base": 20.0,
+        "height_scale": 45.0,
+        "detail_scale": 12.0,
+        "density_3d_weight": 2.5,
+        "temperature": -0.6,
+        "humidity": 0.0,
+        "surface_block": VoxelWorld.VOXEL_BLOCK_STONE,
+        "subsurface_block": VoxelWorld.VOXEL_BLOCK_STONE,
+        "shore_block": VoxelWorld.VOXEL_BLOCK_SAND,
+        "snow_block": VoxelWorld.VOXEL_BLOCK_SNOW,
+        "snow_line": 70,
+        "features": [
+            {
+                "type": "tree",
+                "trunk_block": VoxelWorld.VOXEL_BLOCK_WOOD,
+                "canopy_block": VoxelWorld.VOXEL_BLOCK_LEAVES,
+                "density": 700,
+                "canopy_shape": "cone",
+            }
+        ],
+    })
+
+    biome_registry = reg
+```
+
+**Important**: The registry must be assigned in `_init()`, not `_ready()`, because `VoxelWorld` reads `biome_registry` during `NOTIFICATION_READY`.
 
 ### Adding a Custom Block Type
 

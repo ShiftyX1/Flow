@@ -49,6 +49,7 @@ private:
 	// --- Fog ---
 	bool fog_enabled = true;
 	float fog_distance_ratio = 0.85f; // Fog end as fraction of draw distance.
+	float current_local_light = 1.0f; // Smoothed local light level at camera (0=dark cave, 1=full sun).
 
 	// --- Environment node references (resolved from NodePath) ---
 	NodePath sun_path;
@@ -136,7 +137,7 @@ private:
 
 	// Day/night cycle helpers.
 	void _resolve_environment_nodes();
-	void _update_day_night_cycle(float p_delta);
+	void _update_day_night_cycle(float p_delta, float p_local_light = 1.0f);
 
 protected:
 	void _notification(int p_what);

@@ -414,7 +414,7 @@ void VoxelWorld::_resolve_environment_nodes() {
 	}
 }
 
-void VoxelWorld::_update_day_night_cycle(float p_delta) {
+void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 	// Advance time.
 	if (auto_advance_time && day_length_seconds > 0.0f && p_delta > 0.0f) {
 		time_of_day += (p_delta / day_length_seconds) * 24.0f * time_speed;
@@ -485,12 +485,15 @@ void VoxelWorld::_update_day_night_cycle(float p_delta) {
 				Color twilight_fog(0.85f, 0.5f, 0.25f);
 				Color fog_color = day_fog.lerp(night_fog, 1.0f - day_factor);
 				fog_color = fog_color.lerp(twilight_fog, twilight * 0.6f);
+				// Darken fog in caves/dark areas based on local light level.
+				float fog_brightness = CLAMP(p_local_light, 0.04f, 1.0f);
+				fog_color = fog_color * fog_brightness;
 				env->set_fog_light_color(fog_color);
 
 				env->set_fog_light_energy(Math::lerp(0.3f, 1.0f, day_factor));
-				env->set_fog_sun_scatter(Math::lerp(0.0f, 0.8f, twilight));
+				env->set_fog_sun_scatter(Math::lerp(0.0f, 0.8f, twilight) * p_local_light);
 				env->set_fog_density(1.0f);
-				env->set_fog_sky_affect(0.85f);
+				env->set_fog_sky_affect(0.85f * p_local_light);
 			} else {
 				env->set_fog_enabled(false);
 			}
@@ -543,20 +546,37 @@ void VoxelWorld::_notification(int p_what) {
 
 		case NOTIFICATION_PROCESS: {
 			float delta = get_process_delta_time();
-			_update_day_night_cycle(delta);
-
-			if (!initialized) {
-				return;
-			}
 
 			_integrate_finished_chunks();
 
 			Viewport *vp = get_viewport();
-			if (!vp) {
-				return;
+			Camera3D *cam = vp ? vp->get_camera_3d() : nullptr;
+
+			// Sample local light level at camera position for fog brightness.
+			float target_local_light = 1.0f;
+			if (initialized && cam) {
+				Vector3 cam_pos = cam->get_global_position();
+				int bx = (int)Math::floor(cam_pos.x / block_size);
+				int by = CLAMP((int)Math::floor(cam_pos.y / block_size), 0, VoxelChunk::SIZE_Y - 1);
+				int bz = (int)Math::floor(cam_pos.z / block_size);
+				int cx = (int)Math::floor((float)bx / VoxelChunk::SIZE_X);
+				int cz = (int)Math::floor((float)bz / VoxelChunk::SIZE_Z);
+				int lx = ((bx % VoxelChunk::SIZE_X) + VoxelChunk::SIZE_X) % VoxelChunk::SIZE_X;
+				int lz = ((bz % VoxelChunk::SIZE_Z) + VoxelChunk::SIZE_Z) % VoxelChunk::SIZE_Z;
+				VoxelChunk **cp = loaded_chunks.getptr(Vector2i(cx, cz));
+				if (cp && *cp) {
+					float day_f = _compute_day_factor(time_of_day);
+					float sky = ((*cp)->get_sunlight(lx, by, lz) / 15.0f) * day_f;
+					float blk = (*cp)->get_block_light(lx, by, lz) / 15.0f;
+					target_local_light = MAX(sky, blk);
+				}
 			}
-			Camera3D *cam = vp->get_camera_3d();
-			if (!cam) {
+			// Smooth transition (speed: ~3 units/sec so ~0.3s to go dark).
+			current_local_light = Math::lerp(current_local_light, target_local_light, CLAMP(delta * 3.0f, 0.0f, 1.0f));
+
+			_update_day_night_cycle(delta, current_local_light);
+
+			if (!initialized || !cam) {
 				return;
 			}
 

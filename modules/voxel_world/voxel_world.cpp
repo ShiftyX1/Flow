@@ -474,9 +474,10 @@ void VoxelWorld::_update_day_night_cycle(float p_delta) {
 				env->set_fog_mode(Environment::FOG_MODE_DEPTH);
 
 				float draw_dist = chunk_load_radius * VoxelTerrainGenerator::CHUNK_SIZE_X * block_size;
-				env->set_fog_depth_begin(draw_dist * 0.05f);
-				env->set_fog_depth_end(draw_dist * fog_distance_ratio);
-				env->set_fog_depth_curve(1.5f);
+				float fog_end = draw_dist * fog_distance_ratio;
+				env->set_fog_depth_begin(fog_end * 0.7f);
+				env->set_fog_depth_end(fog_end);
+				env->set_fog_depth_curve(2.5f);
 
 				// Fog color matches sky feeling.
 				Color day_fog(0.6f, 0.75f, 0.92f);
@@ -488,7 +489,7 @@ void VoxelWorld::_update_day_night_cycle(float p_delta) {
 
 				env->set_fog_light_energy(Math::lerp(0.3f, 1.0f, day_factor));
 				env->set_fog_sun_scatter(Math::lerp(0.0f, 0.8f, twilight));
-				env->set_fog_density(Math::lerp(0.015f, 0.008f, day_factor));
+				env->set_fog_density(1.0f);
 				env->set_fog_sky_affect(0.85f);
 			} else {
 				env->set_fog_enabled(false);

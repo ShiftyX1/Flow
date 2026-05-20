@@ -403,3 +403,307 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 
 	return result;
 }
+
+// =============================================================================
+// build_volume_mesh — finite-volume meshing for VoxelScene.
+// =============================================================================
+// Independent of chunk dimensions. Out-of-bounds neighbors are treated as air.
+// AO is baked directly into vertex colors (no CUSTOM0 lighting data).
+
+namespace {
+
+struct VolumeSurface {
+	Vector<Vector3> vertices;
+	Vector<Vector3> normals;
+	Vector<Color> colors;
+	Vector<Vector2> uvs;
+	bool has_uv = false;
+};
+
+_FORCE_INLINE_ int volume_index(int x, int y, int z, const Vector3i &size) {
+	return (y * size.z + z) * size.x + x;
+}
+
+_FORCE_INLINE_ int get_block_volume(const uint16_t *blocks, int x, int y, int z, const Vector3i &size) {
+	if (x < 0 || y < 0 || z < 0 || x >= size.x || y >= size.y || z >= size.z) {
+		return VOXEL_BLOCK_AIR;
+	}
+	return (int)blocks[volume_index(x, y, z, size)];
+}
+
+_FORCE_INLINE_ float ao_factor(bool side1, bool side2, bool corner) {
+	int occluders = (int)side1 + (int)side2 + (int)(corner && !(side1 && side2));
+	if (side1 && side2) {
+		occluders = 3;
+	}
+	return 1.0f - occluders * 0.22f; // [0.34, 1.0]
+}
+
+// Compute AO at a face vertex. Samples 3 neighbors of the face-adjacent cell:
+// face+u, face+v, face+u+v (where (u, v) are tangent offsets ±1).
+float compute_face_vertex_ao(const uint16_t *blocks, const Vector3i &size,
+		int bx, int by, int bz, const Vector3 &normal, int corner_u, int corner_v,
+		const VoxelBlockRegistry *reg) {
+	int nx = (int)normal.x;
+	int ny = (int)normal.y;
+	int nz = (int)normal.z;
+	int fx = bx + nx, fy = by + ny, fz = bz + nz;
+	int du_x = 0, du_y = 0, du_z = 0;
+	int dv_x = 0, dv_y = 0, dv_z = 0;
+	if (ny != 0) {
+		du_x = corner_u;
+		dv_z = corner_v;
+	} else if (nx != 0) {
+		du_z = corner_u;
+		dv_y = corner_v;
+	} else {
+		du_x = corner_u;
+		dv_y = corner_v;
+	}
+	auto solid = [&](int x, int y, int z) -> bool {
+		int t = get_block_volume(blocks, x, y, z, size);
+		return reg ? reg->is_solid(t) : (t != VOXEL_BLOCK_AIR);
+	};
+	bool s1 = solid(fx + du_x, fy + du_y, fz + du_z);
+	bool s2 = solid(fx + dv_x, fy + dv_y, fz + dv_z);
+	bool sc = solid(fx + du_x + dv_x, fy + du_y + dv_y, fz + du_z + dv_z);
+	return ao_factor(s1, s2, sc);
+}
+
+void volume_add_face(VolumeSurface &surf,
+		const Vector3 &v0, const Vector3 &v1, const Vector3 &v2, const Vector3 &v3,
+		const Vector3 &normal, const Color &base_color, bool has_uv, bool flip_v,
+		float ao0, float ao1, float ao2, float ao3) {
+	// CCW winding: tri1 = v0,v2,v1 ; tri2 = v0,v3,v2.
+	surf.vertices.push_back(v0);
+	surf.vertices.push_back(v2);
+	surf.vertices.push_back(v1);
+	surf.vertices.push_back(v0);
+	surf.vertices.push_back(v3);
+	surf.vertices.push_back(v2);
+
+	for (int i = 0; i < 6; i++) {
+		surf.normals.push_back(normal);
+	}
+
+	auto shade = [&](float ao) {
+		return Color(base_color.r * ao, base_color.g * ao, base_color.b * ao, base_color.a);
+	};
+	surf.colors.push_back(shade(ao0));
+	surf.colors.push_back(shade(ao2));
+	surf.colors.push_back(shade(ao1));
+	surf.colors.push_back(shade(ao0));
+	surf.colors.push_back(shade(ao3));
+	surf.colors.push_back(shade(ao2));
+
+	if (has_uv) {
+		surf.has_uv = true;
+		if (flip_v) {
+			surf.uvs.push_back(Vector2(0, 1));
+			surf.uvs.push_back(Vector2(1, 0));
+			surf.uvs.push_back(Vector2(0, 0));
+			surf.uvs.push_back(Vector2(0, 1));
+			surf.uvs.push_back(Vector2(1, 1));
+			surf.uvs.push_back(Vector2(1, 0));
+		} else {
+			surf.uvs.push_back(Vector2(0, 0));
+			surf.uvs.push_back(Vector2(1, 1));
+			surf.uvs.push_back(Vector2(0, 1));
+			surf.uvs.push_back(Vector2(0, 0));
+			surf.uvs.push_back(Vector2(1, 0));
+			surf.uvs.push_back(Vector2(1, 1));
+		}
+	} else {
+		for (int i = 0; i < 6; i++) {
+			surf.uvs.push_back(Vector2(0, 0));
+		}
+	}
+}
+
+Array make_surface_arrays(const VolumeSurface &sd) {
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = sd.vertices;
+	arrays[Mesh::ARRAY_NORMAL] = sd.normals;
+	arrays[Mesh::ARRAY_COLOR] = sd.colors;
+	if (sd.has_uv) {
+		arrays[Mesh::ARRAY_TEX_UV] = sd.uvs;
+	}
+	return arrays;
+}
+
+// Same per-face corner offset table used by build_chunk_mesh, duplicated here
+// to keep the volume mesher self-contained.
+struct VolumeFaceCorners {
+	int u[4];
+	int v[4];
+};
+static const VolumeFaceCorners vc_px = { { -1, -1, 0, 0 }, { -1, 0, 0, -1 } };
+static const VolumeFaceCorners vc_nx = { { 0, 0, -1, -1 }, { -1, 0, 0, -1 } };
+static const VolumeFaceCorners vc_py = { { -1, -1, 0, 0 }, { -1, 0, 0, -1 } };
+static const VolumeFaceCorners vc_ny = { { -1, -1, 0, 0 }, { 0, -1, -1, 0 } };
+static const VolumeFaceCorners vc_pz = { { 0, 0, -1, -1 }, { -1, 0, 0, -1 } };
+static const VolumeFaceCorners vc_nz = { { -1, -1, 0, 0 }, { -1, 0, 0, -1 } };
+
+} // namespace
+
+Vector<VoxelMesher::MeshSurface> VoxelMesher::build_volume_mesh(const Vector<uint16_t> &p_blocks, const Vector3i &p_size, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const VolumeMeshOptions &p_options) {
+	Vector<MeshSurface> result;
+	if (p_size.x <= 0 || p_size.y <= 0 || p_size.z <= 0) {
+		return result;
+	}
+	const int expected = p_size.x * p_size.y * p_size.z;
+	if (p_blocks.size() != expected) {
+		return result;
+	}
+
+	const uint16_t *blocks = p_blocks.ptr();
+	const bool use_registry = p_registry.is_valid();
+	const VoxelBlockRegistry *reg = use_registry ? p_registry.ptr() : nullptr;
+	const float bs = p_block_size;
+	const bool bake_ao = p_options.bake_ao;
+
+	VolumeSurface untextured_surface;
+	HashMap<Ref<Texture2D>, VolumeSurface> textured_surfaces;
+	HashMap<Ref<Texture2D>, int> textured_block_types;
+
+	auto neighbor_hides_face = [&](int type, int nx, int ny, int nz) -> bool {
+		int n = get_block_volume(blocks, nx, ny, nz, p_size);
+		if (n == VOXEL_BLOCK_AIR) {
+			return false;
+		}
+		bool n_solid = reg ? reg->is_solid(n) : true;
+		if (!n_solid) {
+			return false;
+		}
+		if (reg && reg->is_transparent(n)) {
+			return false;
+		}
+		if (reg && reg->is_uses_alpha(n)) {
+			return false;
+		}
+		// If the current block is non-solid (e.g. transparent/cross), still hide if neighbor is opaque.
+		(void)type;
+		return true;
+	};
+
+	float vao[4];
+	auto fill_ao = [&](int bx, int by, int bz, const Vector3 &n, const VolumeFaceCorners &c) {
+		if (!bake_ao) {
+			vao[0] = vao[1] = vao[2] = vao[3] = 1.0f;
+			return;
+		}
+		for (int i = 0; i < 4; i++) {
+			vao[i] = compute_face_vertex_ao(blocks, p_size, bx, by, bz, n, c.u[i], c.v[i], reg);
+		}
+	};
+
+	for (int y = 0; y < p_size.y; y++) {
+		for (int z = 0; z < p_size.z; z++) {
+			for (int x = 0; x < p_size.x; x++) {
+				int type = (int)blocks[volume_index(x, y, z, p_size)];
+				if (type == VOXEL_BLOCK_AIR) {
+					continue;
+				}
+				bool solid = use_registry ? reg->is_solid(type) : true;
+				// Skip non-solid, non-emissive, non-shadered blocks.
+				if (!solid) {
+					continue;
+				}
+
+				Color col = use_registry ? reg->get_color(type) : Color(1, 1, 1);
+				Vector3 origin(x * bs, y * bs, z * bs);
+				float mesh_h = use_registry ? reg->get_block_mesh_height(type) : 1.0f;
+				const float top_y = bs * mesh_h;
+
+				Ref<Texture2D> tex_top, tex_bottom, tex_side;
+				if (use_registry) {
+					tex_top = reg->get_block_texture_for_face(type, Vector3(0, 1, 0));
+					tex_bottom = reg->get_block_texture_for_face(type, Vector3(0, -1, 0));
+					tex_side = reg->get_block_texture_for_face(type, Vector3(1, 0, 0));
+				}
+
+				auto get_face_surface = [&](const Ref<Texture2D> &p_tex) -> VolumeSurface * {
+					if (p_tex.is_valid()) {
+						if (!textured_block_types.has(p_tex)) {
+							textured_block_types[p_tex] = type;
+						}
+						return &textured_surfaces[p_tex];
+					}
+					return &untextured_surface;
+				};
+				auto face_color_for = [&](const Ref<Texture2D> &p_tex) -> Color {
+					return p_tex.is_valid() ? Color(1, 1, 1) : col;
+				};
+
+				if (!neighbor_hides_face(type, x + 1, y, z)) {
+					fill_ao(x, y, z, Vector3(1, 0, 0), vc_px);
+					volume_add_face(*get_face_surface(tex_side),
+							origin + Vector3(bs, 0, 0), origin + Vector3(bs, top_y, 0),
+							origin + Vector3(bs, top_y, bs), origin + Vector3(bs, 0, bs),
+							Vector3(1, 0, 0), face_color_for(tex_side), tex_side.is_valid(), true,
+							vao[0], vao[1], vao[2], vao[3]);
+				}
+				if (!neighbor_hides_face(type, x - 1, y, z)) {
+					fill_ao(x, y, z, Vector3(-1, 0, 0), vc_nx);
+					volume_add_face(*get_face_surface(tex_side),
+							origin + Vector3(0, 0, bs), origin + Vector3(0, top_y, bs),
+							origin + Vector3(0, top_y, 0), origin + Vector3(0, 0, 0),
+							Vector3(-1, 0, 0), face_color_for(tex_side), tex_side.is_valid(), true,
+							vao[0], vao[1], vao[2], vao[3]);
+				}
+				if (!neighbor_hides_face(type, x, y + 1, z)) {
+					fill_ao(x, y, z, Vector3(0, 1, 0), vc_py);
+					volume_add_face(*get_face_surface(tex_top),
+							origin + Vector3(0, top_y, 0), origin + Vector3(0, top_y, bs),
+							origin + Vector3(bs, top_y, bs), origin + Vector3(bs, top_y, 0),
+							Vector3(0, 1, 0), face_color_for(tex_top), tex_top.is_valid(), false,
+							vao[0], vao[1], vao[2], vao[3]);
+				}
+				if (!neighbor_hides_face(type, x, y - 1, z)) {
+					fill_ao(x, y, z, Vector3(0, -1, 0), vc_ny);
+					volume_add_face(*get_face_surface(tex_bottom),
+							origin + Vector3(0, 0, bs), origin + Vector3(0, 0, 0),
+							origin + Vector3(bs, 0, 0), origin + Vector3(bs, 0, bs),
+							Vector3(0, -1, 0), face_color_for(tex_bottom), tex_bottom.is_valid(), false,
+							vao[0], vao[1], vao[2], vao[3]);
+				}
+				if (!neighbor_hides_face(type, x, y, z + 1)) {
+					fill_ao(x, y, z, Vector3(0, 0, 1), vc_pz);
+					volume_add_face(*get_face_surface(tex_side),
+							origin + Vector3(bs, 0, bs), origin + Vector3(bs, top_y, bs),
+							origin + Vector3(0, top_y, bs), origin + Vector3(0, 0, bs),
+							Vector3(0, 0, 1), face_color_for(tex_side), tex_side.is_valid(), true,
+							vao[0], vao[1], vao[2], vao[3]);
+				}
+				if (!neighbor_hides_face(type, x, y, z - 1)) {
+					fill_ao(x, y, z, Vector3(0, 0, -1), vc_nz);
+					volume_add_face(*get_face_surface(tex_side),
+							origin + Vector3(0, 0, 0), origin + Vector3(0, top_y, 0),
+							origin + Vector3(bs, top_y, 0), origin + Vector3(bs, 0, 0),
+							Vector3(0, 0, -1), face_color_for(tex_side), tex_side.is_valid(), true,
+							vao[0], vao[1], vao[2], vao[3]);
+				}
+			}
+		}
+	}
+
+	if (untextured_surface.vertices.size() > 0) {
+		MeshSurface s;
+		s.arrays = make_surface_arrays(untextured_surface);
+		result.push_back(s);
+	}
+	for (const KeyValue<Ref<Texture2D>, VolumeSurface> &E : textured_surfaces) {
+		if (E.value.vertices.size() == 0) {
+			continue;
+		}
+		MeshSurface s;
+		s.arrays = make_surface_arrays(E.value);
+		s.texture = E.key;
+		if (textured_block_types.has(E.key)) {
+			s.block_type = textured_block_types[E.key];
+		}
+		result.push_back(s);
+	}
+	return result;
+}

@@ -50,6 +50,15 @@ public:
 
 	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint16_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const NeighborBlocks &p_neighbors = NeighborBlocks(), const uint8_t *p_light_data = nullptr, const NeighborLight &p_neighbor_light = NeighborLight());
 
+	// Build a mesh for a finite voxel volume with arbitrary dimensions.
+	// Used by VoxelScene (no streaming, no neighbor chunks, no BFS sunlight).
+	// AO is baked directly into vertex colors. Out-of-bounds neighbors are treated as air.
+	struct VolumeMeshOptions {
+		bool bake_ao = true; // If true, multiply face vertex colors by smooth AO factor.
+		VolumeMeshOptions() {}
+	};
+	static Vector<MeshSurface> build_volume_mesh(const Vector<uint16_t> &p_blocks, const Vector3i &p_size, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const VolumeMeshOptions &p_options = VolumeMeshOptions());
+
 private:
 	static const int CX = VoxelTerrainGenerator::CHUNK_SIZE_X;
 	static const int CY = VoxelTerrainGenerator::CHUNK_SIZE_Y;

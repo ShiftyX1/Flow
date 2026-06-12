@@ -6,9 +6,11 @@
 #include "voxel_light_map.h"
 #include "voxel_mesher.h"
 #include "voxel_terrain_generator.h"
+#include "voxel_world_save.h"
 
 #include "core/os/mutex.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/hash_set.h"
 #include "scene/3d/light_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/3d/world_environment.h"
@@ -64,9 +66,16 @@ private:
 
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
+	HashSet<Vector2i> dirty_saved_chunks;
 	Ref<StandardMaterial3D> material;
 	Ref<Shader> voxel_shader;
 	Ref<ShaderMaterial> voxel_shader_material;
+
+	String world_save_dir;
+	Dictionary world_save_metadata;
+	Dictionary world_save_player_state;
+	Dictionary world_save_character_state;
+	bool world_save_loaded = false;
 
 	bool initialized = false;
 	Vector2i last_camera_chunk = Vector2i(INT32_MAX, INT32_MAX);
@@ -130,6 +139,11 @@ private:
 	void _update_chunks(const Vector3 &p_camera_pos);
 	void _request_chunk(int p_cx, int p_cz);
 	void _unload_chunk(int p_cx, int p_cz);
+	Error _save_chunk_if_dirty(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_force = false);
+	Error _flush_dirty_saved_chunks();
+	Error _load_world_save_metadata(const String &p_save_dir);
+	Error _write_world_save_metadata();
+	Dictionary _build_world_save_metadata(const String &p_display_name, int p_resolved_seed, const Dictionary &p_player_state, const Dictionary &p_character_state) const;
 
 	// Helpers for coordinate conversion.
 	Vector2i _world_to_chunk(const Vector3 &p_world_pos) const;
@@ -237,6 +251,15 @@ public:
 	// Move an AABB body through the voxel world with collision.
 	// Returns Dictionary: { "position": Vector3, "velocity": Vector3, "on_ground": bool, "in_water": bool }
 	Dictionary move_body(const AABB &p_body, const Vector3 &p_velocity, float p_delta) const;
+
+	// --- Persistent world save API ---
+	Error create_world_save(const String &p_save_dir, const String &p_display_name, int p_save_seed = -1, const Dictionary &p_player_state = Dictionary(), const Dictionary &p_character_state = Dictionary());
+	Error load_world_save(const String &p_save_dir);
+	Error save_world_state(const Dictionary &p_player_state = Dictionary(), const Dictionary &p_character_state = Dictionary());
+	Error close_world_save();
+	bool is_world_save_loaded() const { return world_save_loaded; }
+	Dictionary get_world_save_metadata() const { return world_save_metadata; }
+	Dictionary get_world_save_player_state() const { return world_save_player_state; }
 
 	VoxelWorld();
 	~VoxelWorld();

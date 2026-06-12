@@ -82,6 +82,56 @@
 				Returns a smooth factor (0.0–1.0) representing how "daytime" it currently is. 1.0 = full day (7:00–17:00), 0.0 = full night (19:00–5:00), with smooth transitions during sunrise and sunset.
 			</description>
 		</method>
+		<method name="create_world_save">
+			<return type="int" />
+			<param index="0" name="save_dir" type="String" />
+			<param index="1" name="display_name" type="String" />
+			<param index="2" name="save_seed" type="int" default="-1" />
+			<param index="3" name="player_state" type="Dictionary" default="{}" />
+			<param index="4" name="character_state" type="Dictionary" default="{}" />
+			<description>
+				Creates a persistent world save rooted at [param save_dir], initializes the world seed, and writes [code]metadata.cfg[/code]. If [param save_seed] is [code]-1[/code], a random seed is resolved and stored for deterministic reloads.
+			</description>
+		</method>
+		<method name="load_world_save">
+			<return type="int" />
+			<param index="0" name="save_dir" type="String" />
+			<description>
+				Loads save metadata from [param save_dir], applies the saved seed and world time, clears loaded chunks, and reloads chunks from saved chunk deltas when available.
+			</description>
+		</method>
+		<method name="save_world_state">
+			<return type="int" />
+			<param index="0" name="player_state" type="Dictionary" default="{}" />
+			<param index="1" name="character_state" type="Dictionary" default="{}" />
+			<description>
+				Flushes dirty saved chunks and updates [code]metadata.cfg[/code] with the current world time, seed, [param player_state], and [param character_state].
+			</description>
+		</method>
+		<method name="close_world_save">
+			<return type="int" />
+			<description>
+				Saves pending world state and detaches the current persistent save.
+			</description>
+		</method>
+		<method name="is_world_save_loaded" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when this VoxelWorld is attached to a persistent world save.
+			</description>
+		</method>
+		<method name="get_world_save_metadata" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the loaded save metadata, including display name, seed, world time, timestamps, player state, and character state.
+			</description>
+		</method>
+		<method name="get_world_save_player_state" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the player state loaded from or last written to the active world save.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="-1">

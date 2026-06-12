@@ -1,9 +1,13 @@
 #include "voxel_world.h"
 
 #include "core/config/engine.h"
+#include "core/io/config_file.h"
+#include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/object/worker_thread_pool.h"
+#include "core/os/time.h"
 #include "core/string/print_string.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/main/viewport.h"
@@ -72,6 +76,13 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("block_to_world_pos", "block_pos"), &VoxelWorld::block_to_world_pos);
 	ClassDB::bind_method(D_METHOD("raycast_block", "origin", "direction", "max_distance"), &VoxelWorld::raycast_block, DEFVAL(10.0f));
 	ClassDB::bind_method(D_METHOD("move_body", "body", "velocity", "delta"), &VoxelWorld::move_body);
+	ClassDB::bind_method(D_METHOD("create_world_save", "save_dir", "display_name", "save_seed", "player_state", "character_state"), &VoxelWorld::create_world_save, DEFVAL(-1), DEFVAL(Dictionary()), DEFVAL(Dictionary()));
+	ClassDB::bind_method(D_METHOD("load_world_save", "save_dir"), &VoxelWorld::load_world_save);
+	ClassDB::bind_method(D_METHOD("save_world_state", "player_state", "character_state"), &VoxelWorld::save_world_state, DEFVAL(Dictionary()), DEFVAL(Dictionary()));
+	ClassDB::bind_method(D_METHOD("close_world_save"), &VoxelWorld::close_world_save);
+	ClassDB::bind_method(D_METHOD("is_world_save_loaded"), &VoxelWorld::is_world_save_loaded);
+	ClassDB::bind_method(D_METHOD("get_world_save_metadata"), &VoxelWorld::get_world_save_metadata);
+	ClassDB::bind_method(D_METHOD("get_world_save_player_state"), &VoxelWorld::get_world_save_player_state);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed", PROPERTY_HINT_RANGE, "-1,2147483647,1"), "set_seed", "get_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_load_radius", PROPERTY_HINT_RANGE, "2,16,1"), "set_chunk_load_radius", "get_chunk_load_radius");
@@ -602,6 +613,7 @@ void VoxelWorld::_initialize_world() {
 	int effective_seed = seed;
 	if (effective_seed < 0) {
 		effective_seed = Math::random(0, 2147483647);
+		seed = effective_seed;
 	}
 	generator->set_seed(effective_seed);
 	generator->set_sea_level(sea_level);
@@ -739,6 +751,7 @@ void VoxelWorld::_cleanup_world() {
 		_unload_chunk(keys[i].x, keys[i].y);
 	}
 	loaded_chunks.clear();
+	dirty_saved_chunks.clear();
 
 	// Safety: remove any block lights not already freed by _unload_chunk.
 	for (const KeyValue<Vector3i, OmniLight3D *> &E : block_lights) {
@@ -838,6 +851,13 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 		result.light_data = data->pre_light;
 	} else {
 		result.blocks = world->generator->generate_chunk_data(data->chunk_x, data->chunk_z);
+		if (world->world_save_loaded && !world->world_save_dir.is_empty()) {
+			Vector<uint16_t> saved_blocks;
+			const String chunk_path = VoxelWorldSave::get_chunk_file_path(world->world_save_dir, data->key);
+			if (FileAccess::exists(chunk_path) && VoxelWorldSave::load_chunk_file(chunk_path, &saved_blocks) == OK) {
+				result.blocks = saved_blocks;
+			}
+		}
 	}
 
 	// --- Light propagation ---
@@ -1245,6 +1265,43 @@ void VoxelWorld::_integrate_finished_chunks() {
 	}
 }
 
+Error VoxelWorld::_save_chunk_if_dirty(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_force) {
+	if (!world_save_loaded || world_save_dir.is_empty() || p_chunk == nullptr) {
+		return OK;
+	}
+	if (!p_force && !dirty_saved_chunks.has(p_key)) {
+		return OK;
+	}
+	const String chunk_path = VoxelWorldSave::get_chunk_file_path(world_save_dir, p_key);
+	Error err = VoxelWorldSave::save_chunk_file(chunk_path, p_chunk->get_blocks());
+	if (err == OK) {
+		dirty_saved_chunks.erase(p_key);
+	}
+	return err;
+}
+
+Error VoxelWorld::_flush_dirty_saved_chunks() {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return OK;
+	}
+	Error result = OK;
+	Vector<Vector2i> dirty_keys;
+	for (const Vector2i &key : dirty_saved_chunks) {
+		dirty_keys.push_back(key);
+	}
+	for (int i = 0; i < dirty_keys.size(); i++) {
+		VoxelChunk *const *chunk_ptr = loaded_chunks.getptr(dirty_keys[i]);
+		if (!chunk_ptr) {
+			continue;
+		}
+		Error err = _save_chunk_if_dirty(dirty_keys[i], *chunk_ptr, true);
+		if (err != OK && result == OK) {
+			result = err;
+		}
+	}
+	return result;
+}
+
 void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 	Vector2i key(p_cx, p_cz);
 	VoxelChunk **chunk_ptr = loaded_chunks.getptr(key);
@@ -1253,6 +1310,7 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 	}
 
 	VoxelChunk *chunk = *chunk_ptr;
+	_save_chunk_if_dirty(key, chunk);
 	MeshInstance3D *mi = chunk->get_mesh_instance();
 	if (mi && mi->get_parent() == this) {
 		remove_child(mi);
@@ -1280,6 +1338,185 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 	memdelete(chunk);
 	loaded_chunks.erase(key);
 	pending_remesh.erase(key); // discard any pending remesh; result will be ignored
+}
+
+Dictionary VoxelWorld::_build_world_save_metadata(const String &p_display_name, int p_resolved_seed, const Dictionary &p_player_state, const Dictionary &p_character_state) const {
+	const double now = Time::get_singleton()->get_unix_time_from_system();
+	Dictionary metadata;
+	metadata["schema_version"] = 1;
+	metadata["display_name"] = p_display_name.is_empty() ? String("New World") : p_display_name;
+	metadata["seed"] = p_resolved_seed;
+	metadata["world_time"] = time_of_day;
+	metadata["time_of_day"] = time_of_day;
+	metadata["created_unix"] = now;
+	metadata["updated_unix"] = now;
+	metadata["player_state"] = p_player_state;
+	metadata["character_state"] = p_character_state;
+	return metadata;
+}
+
+Error VoxelWorld::_load_world_save_metadata(const String &p_save_dir) {
+	const String metadata_path = VoxelWorldSave::get_metadata_path(p_save_dir);
+	ERR_FAIL_COND_V_MSG(!FileAccess::exists(metadata_path), ERR_FILE_NOT_FOUND, vformat("VoxelWorld: save metadata not found: %s", metadata_path));
+
+	Ref<ConfigFile> config;
+	config.instantiate();
+	Error err = config->load(metadata_path);
+	ERR_FAIL_COND_V_MSG(err != OK, err, vformat("VoxelWorld: failed to load save metadata: %s", metadata_path));
+
+	const int schema_version = (int)config->get_value("world", "schema_version", 0);
+	ERR_FAIL_COND_V_MSG(schema_version != 1, ERR_FILE_UNRECOGNIZED, vformat("VoxelWorld: unsupported save schema version %d.", schema_version));
+
+	world_save_metadata.clear();
+	world_save_metadata["schema_version"] = schema_version;
+	String slot_id = config->get_value("world", "slot_id", p_save_dir.get_file());
+	if (slot_id.is_empty()) {
+		slot_id = p_save_dir.get_file();
+	}
+	world_save_metadata["slot_id"] = slot_id;
+	world_save_metadata["save_dir"] = p_save_dir;
+	world_save_metadata["display_name"] = config->get_value("world", "display_name", String("New World"));
+	world_save_metadata["seed"] = (int)config->get_value("world", "seed", -1);
+	const double world_time = (double)config->get_value("world", "world_time", config->get_value("world", "time_of_day", (double)start_time_of_day));
+	world_save_metadata["world_time"] = world_time;
+	world_save_metadata["time_of_day"] = world_time;
+	world_save_metadata["created_unix"] = (double)config->get_value("world", "created_unix", 0.0);
+	world_save_metadata["updated_unix"] = (double)config->get_value("world", "updated_unix", 0.0);
+
+	world_save_player_state = (Dictionary)config->get_value("player", "state", Dictionary());
+	world_save_character_state = (Dictionary)config->get_value("character", "state", Dictionary());
+	world_save_metadata["player_state"] = world_save_player_state;
+	world_save_metadata["character_state"] = world_save_character_state;
+	return OK;
+}
+
+Error VoxelWorld::_write_world_save_metadata() {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return ERR_UNCONFIGURED;
+	}
+	Error err = VoxelWorldSave::ensure_save_dirs(world_save_dir);
+	ERR_FAIL_COND_V(err != OK, err);
+
+	const String metadata_path = VoxelWorldSave::get_metadata_path(world_save_dir);
+	const String tmp_path = metadata_path + ".tmp";
+	Ref<ConfigFile> config;
+	config.instantiate();
+	config->set_value("world", "schema_version", (int)world_save_metadata.get("schema_version", 1));
+	config->set_value("world", "slot_id", world_save_metadata.get("slot_id", String()));
+	config->set_value("world", "display_name", world_save_metadata.get("display_name", String("New World")));
+	config->set_value("world", "seed", (int)world_save_metadata.get("seed", seed));
+	const double world_time = (double)world_save_metadata.get("world_time", world_save_metadata.get("time_of_day", (double)time_of_day));
+	config->set_value("world", "world_time", world_time);
+	config->set_value("world", "time_of_day", world_time);
+	config->set_value("world", "created_unix", (double)world_save_metadata.get("created_unix", Time::get_singleton()->get_unix_time_from_system()));
+	config->set_value("world", "updated_unix", (double)world_save_metadata.get("updated_unix", Time::get_singleton()->get_unix_time_from_system()));
+	config->set_value("player", "state", world_save_player_state);
+	config->set_value("character", "state", world_save_character_state);
+	err = config->save(tmp_path);
+	ERR_FAIL_COND_V(err != OK, err);
+	if (FileAccess::exists(metadata_path)) {
+		err = DirAccess::remove_absolute(metadata_path);
+		ERR_FAIL_COND_V(err != OK, err);
+	}
+	return DirAccess::rename_absolute(tmp_path, metadata_path);
+}
+
+Error VoxelWorld::create_world_save(const String &p_save_dir, const String &p_display_name, int p_save_seed, const Dictionary &p_player_state, const Dictionary &p_character_state) {
+	ERR_FAIL_COND_V_MSG(p_save_dir.is_empty(), ERR_INVALID_PARAMETER, "VoxelWorld::create_world_save requires a save directory.");
+
+	if (world_save_loaded) {
+		save_world_state();
+	}
+	if (initialized) {
+		_cleanup_world();
+	}
+
+	Error err = VoxelWorldSave::ensure_save_dirs(p_save_dir);
+	ERR_FAIL_COND_V(err != OK, err);
+
+	int resolved_seed = p_save_seed;
+	if (resolved_seed < 0) {
+		resolved_seed = Math::random(0, 2147483647);
+	}
+	seed = resolved_seed;
+	start_time_of_day = time_of_day;
+	world_save_dir = p_save_dir;
+	world_save_player_state = p_player_state;
+	world_save_character_state = p_character_state;
+	world_save_metadata = _build_world_save_metadata(p_display_name, resolved_seed, world_save_player_state, world_save_character_state);
+	world_save_metadata["slot_id"] = p_save_dir.get_file();
+	world_save_metadata["save_dir"] = p_save_dir;
+	world_save_loaded = true;
+	dirty_saved_chunks.clear();
+
+	err = _write_world_save_metadata();
+	if (err != OK) {
+		world_save_loaded = false;
+		return err;
+	}
+	_initialize_world();
+	return OK;
+}
+
+Error VoxelWorld::load_world_save(const String &p_save_dir) {
+	ERR_FAIL_COND_V_MSG(p_save_dir.is_empty(), ERR_INVALID_PARAMETER, "VoxelWorld::load_world_save requires a save directory.");
+
+	if (world_save_loaded) {
+		save_world_state();
+	}
+	if (initialized) {
+		_cleanup_world();
+	}
+
+	Error err = _load_world_save_metadata(p_save_dir);
+	ERR_FAIL_COND_V(err != OK, err);
+
+	world_save_dir = p_save_dir;
+	world_save_loaded = true;
+	dirty_saved_chunks.clear();
+	seed = (int)world_save_metadata.get("seed", seed);
+	set_time_of_day((float)(double)world_save_metadata.get("world_time", world_save_metadata.get("time_of_day", (double)start_time_of_day)));
+	_initialize_world();
+	return OK;
+}
+
+Error VoxelWorld::save_world_state(const Dictionary &p_player_state, const Dictionary &p_character_state) {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return ERR_UNCONFIGURED;
+	}
+	if (!p_player_state.is_empty()) {
+		world_save_player_state = p_player_state;
+	}
+	if (!p_character_state.is_empty()) {
+		world_save_character_state = p_character_state;
+	}
+	const double now = Time::get_singleton()->get_unix_time_from_system();
+	world_save_metadata["seed"] = seed;
+	world_save_metadata["world_time"] = time_of_day;
+	world_save_metadata["time_of_day"] = time_of_day;
+	world_save_metadata["updated_unix"] = now;
+	world_save_metadata["player_state"] = world_save_player_state;
+	world_save_metadata["character_state"] = world_save_character_state;
+
+	Error err = _flush_dirty_saved_chunks();
+	if (err != OK) {
+		return err;
+	}
+	return _write_world_save_metadata();
+}
+
+Error VoxelWorld::close_world_save() {
+	if (!world_save_loaded) {
+		return OK;
+	}
+	Error err = save_world_state();
+	world_save_loaded = false;
+	world_save_dir.clear();
+	world_save_metadata.clear();
+	world_save_player_state.clear();
+	world_save_character_state.clear();
+	dirty_saved_chunks.clear();
+	return err;
 }
 
 // --- Coordinate helpers ---
@@ -1340,6 +1577,9 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 
 	int old_id = (int)chunk->get_block(local.x, local.y, local.z);
 	chunk->set_block(local.x, local.y, local.z, p_block_id);
+	if (world_save_loaded && old_id != p_block_id) {
+		dirty_saved_chunks.insert(chunk_key);
+	}
 
 	// Manage OmniLight3D for emissive blocks (e.g. torches).
 	{

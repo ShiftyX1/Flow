@@ -67,6 +67,7 @@ private:
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
 	HashSet<Vector2i> dirty_saved_chunks;
+	HashMap<Vector2i, Vector<uint16_t>> pending_saved_chunk_blocks;
 	Ref<StandardMaterial3D> material;
 	Ref<Shader> voxel_shader;
 	Ref<ShaderMaterial> voxel_shader_material;
@@ -139,8 +140,10 @@ private:
 	void _update_chunks(const Vector3 &p_camera_pos);
 	void _request_chunk(int p_cx, int p_cz);
 	void _unload_chunk(int p_cx, int p_cz);
+	Error _save_chunk_blocks(const Vector2i &p_key, const Vector<uint16_t> &p_blocks);
 	Error _save_chunk_if_dirty(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_force = false);
-	Error _flush_dirty_saved_chunks();
+	void _queue_chunk_save_snapshot(const Vector2i &p_key, VoxelChunk *p_chunk);
+	Error _flush_dirty_saved_chunks(int p_max_chunks = -1);
 	Error _load_world_save_metadata(const String &p_save_dir);
 	Error _write_world_save_metadata();
 	Dictionary _build_world_save_metadata(const String &p_display_name, int p_resolved_seed, const Dictionary &p_player_state, const Dictionary &p_character_state) const;
@@ -255,7 +258,9 @@ public:
 	// --- Persistent world save API ---
 	Error create_world_save(const String &p_save_dir, const String &p_display_name, int p_save_seed = -1, const Dictionary &p_player_state = Dictionary(), const Dictionary &p_character_state = Dictionary());
 	Error load_world_save(const String &p_save_dir);
-	Error save_world_state(const Dictionary &p_player_state = Dictionary(), const Dictionary &p_character_state = Dictionary());
+	Error save_world_state(const Dictionary &p_player_state = Dictionary(), const Dictionary &p_character_state = Dictionary(), int p_max_dirty_chunks = -1);
+	Error flush_world_save_dirty_chunks(int p_max_chunks = 1);
+	int get_world_save_dirty_chunk_count() const { return (int)dirty_saved_chunks.size() + (int)pending_saved_chunk_blocks.size(); }
 	Error close_world_save();
 	bool is_world_save_loaded() const { return world_save_loaded; }
 	Dictionary get_world_save_metadata() const { return world_save_metadata; }

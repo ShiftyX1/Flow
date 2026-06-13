@@ -78,7 +78,9 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("move_body", "body", "velocity", "delta"), &VoxelWorld::move_body);
 	ClassDB::bind_method(D_METHOD("create_world_save", "save_dir", "display_name", "save_seed", "player_state", "character_state"), &VoxelWorld::create_world_save, DEFVAL(-1), DEFVAL(Dictionary()), DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("load_world_save", "save_dir"), &VoxelWorld::load_world_save);
-	ClassDB::bind_method(D_METHOD("save_world_state", "player_state", "character_state"), &VoxelWorld::save_world_state, DEFVAL(Dictionary()), DEFVAL(Dictionary()));
+	ClassDB::bind_method(D_METHOD("save_world_state", "player_state", "character_state", "max_dirty_chunks"), &VoxelWorld::save_world_state, DEFVAL(Dictionary()), DEFVAL(Dictionary()), DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("flush_world_save_dirty_chunks", "max_chunks"), &VoxelWorld::flush_world_save_dirty_chunks, DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("get_world_save_dirty_chunk_count"), &VoxelWorld::get_world_save_dirty_chunk_count);
 	ClassDB::bind_method(D_METHOD("close_world_save"), &VoxelWorld::close_world_save);
 	ClassDB::bind_method(D_METHOD("is_world_save_loaded"), &VoxelWorld::is_world_save_loaded);
 	ClassDB::bind_method(D_METHOD("get_world_save_metadata"), &VoxelWorld::get_world_save_metadata);
@@ -549,7 +551,9 @@ void VoxelWorld::_notification(int p_what) {
 			if (verbose_logging) {
 				print_line("[VoxelWorld] NOTIFICATION_READY received, initializing...");
 			}
-			time_of_day = start_time_of_day;
+			if (!world_save_loaded) {
+				time_of_day = start_time_of_day;
+			}
 			set_process(true);
 			_resolve_environment_nodes();
 			_initialize_world();
@@ -751,7 +755,6 @@ void VoxelWorld::_cleanup_world() {
 		_unload_chunk(keys[i].x, keys[i].y);
 	}
 	loaded_chunks.clear();
-	dirty_saved_chunks.clear();
 
 	// Safety: remove any block lights not already freed by _unload_chunk.
 	for (const KeyValue<Vector3i, OmniLight3D *> &E : block_lights) {
@@ -1265,6 +1268,14 @@ void VoxelWorld::_integrate_finished_chunks() {
 	}
 }
 
+Error VoxelWorld::_save_chunk_blocks(const Vector2i &p_key, const Vector<uint16_t> &p_blocks) {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return OK;
+	}
+	const String chunk_path = VoxelWorldSave::get_chunk_file_path(world_save_dir, p_key);
+	return VoxelWorldSave::save_chunk_file(chunk_path, p_blocks);
+}
+
 Error VoxelWorld::_save_chunk_if_dirty(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_force) {
 	if (!world_save_loaded || world_save_dir.is_empty() || p_chunk == nullptr) {
 		return OK;
@@ -1272,32 +1283,76 @@ Error VoxelWorld::_save_chunk_if_dirty(const Vector2i &p_key, VoxelChunk *p_chun
 	if (!p_force && !dirty_saved_chunks.has(p_key)) {
 		return OK;
 	}
-	const String chunk_path = VoxelWorldSave::get_chunk_file_path(world_save_dir, p_key);
-	Error err = VoxelWorldSave::save_chunk_file(chunk_path, p_chunk->get_blocks());
+	Error err = _save_chunk_blocks(p_key, p_chunk->get_blocks());
 	if (err == OK) {
 		dirty_saved_chunks.erase(p_key);
 	}
 	return err;
 }
 
-Error VoxelWorld::_flush_dirty_saved_chunks() {
+void VoxelWorld::_queue_chunk_save_snapshot(const Vector2i &p_key, VoxelChunk *p_chunk) {
+	if (!world_save_loaded || world_save_dir.is_empty() || p_chunk == nullptr) {
+		return;
+	}
+	if (!dirty_saved_chunks.has(p_key)) {
+		return;
+	}
+	pending_saved_chunk_blocks[p_key] = p_chunk->get_blocks();
+	dirty_saved_chunks.erase(p_key);
+}
+
+Error VoxelWorld::_flush_dirty_saved_chunks(int p_max_chunks) {
 	if (!world_save_loaded || world_save_dir.is_empty()) {
 		return OK;
 	}
+	if (p_max_chunks == 0) {
+		return OK;
+	}
+
 	Error result = OK;
+	int flushed_count = 0;
+	const bool unlimited = p_max_chunks < 0;
+	auto can_flush_more = [&]() -> bool {
+		return unlimited || flushed_count < p_max_chunks;
+	};
+
+	Vector<Vector2i> pending_keys;
+	for (const KeyValue<Vector2i, Vector<uint16_t>> &E : pending_saved_chunk_blocks) {
+		pending_keys.push_back(E.key);
+	}
+	for (int i = 0; i < pending_keys.size() && can_flush_more(); i++) {
+		const Vector2i key = pending_keys[i];
+		Vector<uint16_t> *blocks = pending_saved_chunk_blocks.getptr(key);
+		if (blocks == nullptr) {
+			continue;
+		}
+		Error err = _save_chunk_blocks(key, *blocks);
+		if (err == OK) {
+			pending_saved_chunk_blocks.erase(key);
+		} else if (result == OK) {
+			result = err;
+		}
+		flushed_count++;
+	}
+	if (!can_flush_more()) {
+		return result;
+	}
+
 	Vector<Vector2i> dirty_keys;
 	for (const Vector2i &key : dirty_saved_chunks) {
 		dirty_keys.push_back(key);
 	}
-	for (int i = 0; i < dirty_keys.size(); i++) {
+	for (int i = 0; i < dirty_keys.size() && can_flush_more(); i++) {
 		VoxelChunk *const *chunk_ptr = loaded_chunks.getptr(dirty_keys[i]);
 		if (!chunk_ptr) {
+			dirty_saved_chunks.erase(dirty_keys[i]);
 			continue;
 		}
 		Error err = _save_chunk_if_dirty(dirty_keys[i], *chunk_ptr, true);
 		if (err != OK && result == OK) {
 			result = err;
 		}
+		flushed_count++;
 	}
 	return result;
 }
@@ -1310,7 +1365,7 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 	}
 
 	VoxelChunk *chunk = *chunk_ptr;
-	_save_chunk_if_dirty(key, chunk);
+	_queue_chunk_save_snapshot(key, chunk);
 	MeshInstance3D *mi = chunk->get_mesh_instance();
 	if (mi && mi->get_parent() == this) {
 		remove_child(mi);
@@ -1448,6 +1503,7 @@ Error VoxelWorld::create_world_save(const String &p_save_dir, const String &p_di
 	world_save_metadata["save_dir"] = p_save_dir;
 	world_save_loaded = true;
 	dirty_saved_chunks.clear();
+	pending_saved_chunk_blocks.clear();
 
 	err = _write_world_save_metadata();
 	if (err != OK) {
@@ -1474,13 +1530,16 @@ Error VoxelWorld::load_world_save(const String &p_save_dir) {
 	world_save_dir = p_save_dir;
 	world_save_loaded = true;
 	dirty_saved_chunks.clear();
+	pending_saved_chunk_blocks.clear();
 	seed = (int)world_save_metadata.get("seed", seed);
-	set_time_of_day((float)(double)world_save_metadata.get("world_time", world_save_metadata.get("time_of_day", (double)start_time_of_day)));
+	const float loaded_time = (float)(double)world_save_metadata.get("world_time", world_save_metadata.get("time_of_day", (double)start_time_of_day));
+	set_start_time_of_day(loaded_time);
+	set_time_of_day(loaded_time);
 	_initialize_world();
 	return OK;
 }
 
-Error VoxelWorld::save_world_state(const Dictionary &p_player_state, const Dictionary &p_character_state) {
+Error VoxelWorld::save_world_state(const Dictionary &p_player_state, const Dictionary &p_character_state, int p_max_dirty_chunks) {
 	if (!world_save_loaded || world_save_dir.is_empty()) {
 		return ERR_UNCONFIGURED;
 	}
@@ -1498,11 +1557,15 @@ Error VoxelWorld::save_world_state(const Dictionary &p_player_state, const Dicti
 	world_save_metadata["player_state"] = world_save_player_state;
 	world_save_metadata["character_state"] = world_save_character_state;
 
-	Error err = _flush_dirty_saved_chunks();
+	Error err = _flush_dirty_saved_chunks(p_max_dirty_chunks);
 	if (err != OK) {
 		return err;
 	}
 	return _write_world_save_metadata();
+}
+
+Error VoxelWorld::flush_world_save_dirty_chunks(int p_max_chunks) {
+	return _flush_dirty_saved_chunks(p_max_chunks);
 }
 
 Error VoxelWorld::close_world_save() {
@@ -1516,6 +1579,7 @@ Error VoxelWorld::close_world_save() {
 	world_save_player_state.clear();
 	world_save_character_state.clear();
 	dirty_saved_chunks.clear();
+	pending_saved_chunk_blocks.clear();
 	return err;
 }
 

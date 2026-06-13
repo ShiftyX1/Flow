@@ -104,8 +104,22 @@
 			<return type="int" />
 			<param index="0" name="player_state" type="Dictionary" default="{}" />
 			<param index="1" name="character_state" type="Dictionary" default="{}" />
+			<param index="2" name="max_dirty_chunks" type="int" default="-1" />
 			<description>
-				Flushes dirty saved chunks and updates [code]metadata.cfg[/code] with the current world time, seed, [param player_state], and [param character_state].
+				Updates [code]metadata.cfg[/code] with the current world time, seed, [param player_state], and [param character_state], then flushes dirty saved chunks according to [param max_dirty_chunks]. Use [code]0[/code] to write metadata only, [code]-1[/code] to flush all dirty chunks, or a positive value to write a bounded number of chunks.
+			</description>
+		</method>
+		<method name="flush_world_save_dirty_chunks">
+			<return type="int" />
+			<param index="0" name="max_chunks" type="int" default="1" />
+			<description>
+				Flushes up to [param max_chunks] dirty saved chunks to disk. Use [code]-1[/code] to flush all pending chunk writes.
+			</description>
+		</method>
+		<method name="get_world_save_dirty_chunk_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of dirty or queued saved chunks waiting to be written.
 			</description>
 		</method>
 		<method name="close_world_save">

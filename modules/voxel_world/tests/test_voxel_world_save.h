@@ -5,8 +5,10 @@
 #pragma once
 
 #include "../voxel_terrain_generator.h"
+#include "../voxel_world.h"
 #include "../voxel_world_save.h"
 
+#include "core/io/config_file.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "tests/test_macros.h"
@@ -64,6 +66,42 @@ TEST_CASE("[VoxelWorld] Corrupt chunk RLE is rejected") {
 	Vector<uint16_t> loaded;
 	CHECK(VoxelWorldSave::load_chunk_file(chunk_path, &loaded) == ERR_FILE_CORRUPT);
 	DirAccess::remove_absolute(chunk_path);
+}
+
+TEST_CASE("[VoxelWorld] Save API exposes budgeted dirty chunk flushing") {
+	VoxelWorld world;
+
+	CHECK(world.get_world_save_dirty_chunk_count() == 0);
+	CHECK(world.flush_world_save_dirty_chunks(1) == OK);
+	CHECK(world.save_world_state(Dictionary(), Dictionary(), 0) == ERR_UNCONFIGURED);
+}
+
+TEST_CASE("[VoxelWorld] Loaded save time becomes current and start time") {
+	const String root = "user://voxel_world_time_test";
+	const String metadata_path = VoxelWorldSave::get_metadata_path(root);
+	CHECK(VoxelWorldSave::ensure_save_dirs(root) == OK);
+
+	Ref<ConfigFile> config;
+	config.instantiate();
+	config->set_value("world", "schema_version", 1);
+	config->set_value("world", "slot_id", root.get_file());
+	config->set_value("world", "display_name", "Time Test");
+	config->set_value("world", "seed", 1234);
+	config->set_value("world", "world_time", 18.25);
+	config->set_value("world", "time_of_day", 18.25);
+	config->set_value("world", "created_unix", 1.0);
+	config->set_value("world", "updated_unix", 2.0);
+	config->set_value("player", "state", Dictionary());
+	config->set_value("character", "state", Dictionary());
+	CHECK(config->save(metadata_path) == OK);
+
+	VoxelWorld world;
+	world.set_start_time_of_day(6.0f);
+	CHECK(world.load_world_save(root) == OK);
+	CHECK(Math::is_equal_approx(world.get_time_of_day(), 18.25f));
+	CHECK(Math::is_equal_approx(world.get_start_time_of_day(), 18.25f));
+
+	DirAccess::remove_absolute(metadata_path);
 }
 
 } // namespace TestVoxelWorldSave

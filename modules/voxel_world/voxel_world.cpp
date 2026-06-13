@@ -75,6 +75,9 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("world_to_block_pos", "world_pos"), &VoxelWorld::world_to_block_pos);
 	ClassDB::bind_method(D_METHOD("block_to_world_pos", "block_pos"), &VoxelWorld::block_to_world_pos);
 	ClassDB::bind_method(D_METHOD("raycast_block", "origin", "direction", "max_distance"), &VoxelWorld::raycast_block, DEFVAL(10.0f));
+	ClassDB::bind_method(D_METHOD("request_chunks_around", "world_position", "radius"), &VoxelWorld::request_chunks_around, DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("get_chunk_region_load_status", "world_position", "radius"), &VoxelWorld::get_chunk_region_load_status, DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("is_chunk_region_loaded", "world_position", "radius"), &VoxelWorld::is_chunk_region_loaded, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("move_body", "body", "velocity", "delta"), &VoxelWorld::move_body);
 	ClassDB::bind_method(D_METHOD("create_world_save", "save_dir", "display_name", "save_seed", "player_state", "character_state"), &VoxelWorld::create_world_save, DEFVAL(-1), DEFVAL(Dictionary()), DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("load_world_save", "save_dir"), &VoxelWorld::load_world_save);
@@ -838,6 +841,77 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 	if (requested_count > 0 && verbose_logging) {
 		print_line("[VoxelWorld] Requested " + itos(requested_count) + " chunks for background generation. Pending: " + itos(pending_chunks.size()) + ".");
 	}
+}
+
+int VoxelWorld::_effective_chunk_region_radius(int p_radius) const {
+	if (p_radius < 0) {
+		return MAX(chunk_load_radius, 0);
+	}
+	return MAX(p_radius, 0);
+}
+
+void VoxelWorld::request_chunks_around(const Vector3 &p_world_position, int p_radius) {
+	if (!initialized) {
+		_initialize_world();
+	}
+	if (!initialized) {
+		return;
+	}
+
+	const int radius = _effective_chunk_region_radius(p_radius);
+	const Vector2i center = _world_to_chunk(p_world_position);
+	for (int dx = -radius; dx <= radius; dx++) {
+		for (int dz = -radius; dz <= radius; dz++) {
+			const Vector2i key(center.x + dx, center.y + dz);
+			if (!loaded_chunks.has(key) && !pending_chunks.has(key)) {
+				_request_chunk(key.x, key.y);
+			}
+		}
+	}
+}
+
+Dictionary VoxelWorld::get_chunk_region_load_status(const Vector3 &p_world_position, int p_radius) {
+	const int radius = _effective_chunk_region_radius(p_radius);
+	const Vector2i center = _world_to_chunk(p_world_position);
+	const int total = (radius * 2 + 1) * (radius * 2 + 1);
+
+	HashSet<Vector2i> finished_keys;
+	{
+		MutexLock lock(finished_mutex);
+		for (int i = 0; i < finished_chunks.size(); i++) {
+			if (!finished_chunks[i].is_remesh) {
+				finished_keys.insert(finished_chunks[i].key);
+			}
+		}
+	}
+
+	int loaded = 0;
+	int pending = 0;
+	for (int dx = -radius; dx <= radius; dx++) {
+		for (int dz = -radius; dz <= radius; dz++) {
+			const Vector2i key(center.x + dx, center.y + dz);
+			if (loaded_chunks.has(key)) {
+				loaded++;
+			} else if (pending_chunks.has(key) || finished_keys.has(key)) {
+				pending++;
+			}
+		}
+	}
+
+	const int remaining = total - loaded;
+	Dictionary status;
+	status["total"] = total;
+	status["loaded"] = loaded;
+	status["pending"] = pending;
+	status["remaining"] = remaining;
+	status["progress"] = total > 0 ? (float)loaded / (float)total : 1.0f;
+	status["ready"] = remaining == 0;
+	return status;
+}
+
+bool VoxelWorld::is_chunk_region_loaded(const Vector3 &p_world_position, int p_radius) {
+	const Dictionary status = get_chunk_region_load_status(p_world_position, p_radius);
+	return (bool)status["ready"];
 }
 
 // Background chunk generation

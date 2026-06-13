@@ -57,6 +57,30 @@
 				Performs a voxel raycast from [param origin] in [param direction]. Returns a Dictionary with keys "position" (Vector3), "normal" (Vector3), "block_id" (int), and "block_pos" (Vector3i) if a solid block is hit, or an empty Dictionary if nothing is hit.
 			</description>
 		</method>
+		<method name="request_chunks_around">
+			<return type="void" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="radius" type="int" default="-1" />
+			<description>
+				Requests chunks in a square region around [param world_position]. If [param radius] is [code]-1[/code], [member chunk_load_radius] is used. This queues missing chunks without unloading camera-driven chunks outside the region.
+			</description>
+		</method>
+		<method name="get_chunk_region_load_status">
+			<return type="Dictionary" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="radius" type="int" default="-1" />
+			<description>
+				Returns chunk readiness around [param world_position] with keys [code]total[/code], [code]loaded[/code], [code]pending[/code], [code]remaining[/code], [code]progress[/code], and [code]ready[/code]. Pending and finished-but-not-integrated chunks are not considered loaded.
+			</description>
+		</method>
+		<method name="is_chunk_region_loaded">
+			<return type="bool" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="radius" type="int" default="-1" />
+			<description>
+				Returns [code]true[/code] when every chunk in the requested region around [param world_position] has been integrated into the scene tree.
+			</description>
+		</method>
 		<method name="advance_time">
 			<return type="void" />
 			<param index="0" name="hours" type="float" />

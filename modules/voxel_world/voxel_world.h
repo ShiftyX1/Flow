@@ -139,6 +139,7 @@ private:
 	void _cleanup_world();
 	void _update_chunks(const Vector3 &p_camera_pos);
 	void _request_chunk(int p_cx, int p_cz);
+	int _effective_chunk_region_radius(int p_radius) const;
 	void _unload_chunk(int p_cx, int p_cz);
 	Error _save_chunk_blocks(const Vector2i &p_key, const Vector<uint16_t> &p_blocks);
 	Error _save_chunk_if_dirty(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_force = false);
@@ -250,6 +251,10 @@ public:
 	// Simple voxel raycast. Returns Dictionary with "position", "normal", "block_id",
 	// "block_pos" keys, or empty Dictionary if nothing hit.
 	Dictionary raycast_block(const Vector3 &p_origin, const Vector3 &p_direction, float p_max_distance = 10.0f) const;
+
+	void request_chunks_around(const Vector3 &p_world_position, int p_radius = -1);
+	Dictionary get_chunk_region_load_status(const Vector3 &p_world_position, int p_radius = -1);
+	bool is_chunk_region_loaded(const Vector3 &p_world_position, int p_radius = -1);
 
 	// Move an AABB body through the voxel world with collision.
 	// Returns Dictionary: { "position": Vector3, "velocity": Vector3, "on_ground": bool, "in_water": bool }

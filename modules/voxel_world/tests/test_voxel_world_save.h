@@ -76,6 +76,22 @@ TEST_CASE("[VoxelWorld] Save API exposes budgeted dirty chunk flushing") {
 	CHECK(world.save_world_state(Dictionary(), Dictionary(), 0) == ERR_UNCONFIGURED);
 }
 
+TEST_CASE("[VoxelWorld] Chunk region loading status exposes safe spawn progress") {
+	VoxelWorld world;
+	world.set_chunk_load_radius(3);
+
+	Dictionary status = world.get_chunk_region_load_status(Vector3(0, 0, 0), 1);
+	CHECK((int)status["total"] == 9);
+	CHECK((int)status["loaded"] == 0);
+	CHECK((int)status["remaining"] == 9);
+	CHECK(Math::is_equal_approx((float)status["progress"], 0.0f));
+	CHECK(!(bool)status["ready"]);
+	CHECK(!world.is_chunk_region_loaded(Vector3(0, 0, 0), 1));
+
+	Dictionary default_radius_status = world.get_chunk_region_load_status(Vector3(0, 0, 0), -1);
+	CHECK((int)default_radius_status["total"] == 49);
+}
+
 TEST_CASE("[VoxelWorld] Loaded save time becomes current and start time") {
 	const String root = "user://voxel_world_time_test";
 	const String metadata_path = VoxelWorldSave::get_metadata_path(root);

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  multiplayer_simulation_clock.h                                        */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,48 +28,41 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
+#pragma once
 
-#include "multiplayer_debugger.h"
-#include "multiplayer_predicted_body_3d.h"
-#include "multiplayer_simulation_clock.h"
-#include "multiplayer_spawner.h"
-#include "multiplayer_snapshot_buffer_3d.h"
-#include "multiplayer_synchronizer.h"
-#include "scene_multiplayer.h"
-#include "scene_replication_interface.h"
-#include "scene_rpc_interface.h"
+#include "core/object/ref_counted.h"
 
-#include "core/object/class_db.h"
+class MultiplayerSimulationClock : public RefCounted {
+	GDCLASS(MultiplayerSimulationClock, RefCounted);
 
-#ifdef TOOLS_ENABLED
-#include "editor/multiplayer_editor_plugin.h"
-#endif
+	int tick_rate = 30;
+	int interpolation_delay_ticks = 2;
+	int64_t local_tick = 0;
+	int64_t observed_server_tick = -1;
+	double accumulator = 0.0;
 
-void initialize_multiplayer_module(ModuleInitializationLevel p_level) {
-	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
-		GDREGISTER_CLASS(MultiplayerSimulationClock);
-		GDREGISTER_CLASS(MultiplayerSnapshotBuffer3D);
-		GDREGISTER_CLASS(MultiplayerPredictedBody3D);
-		GDREGISTER_CLASS(SceneReplicationConfig);
-		GDREGISTER_CLASS(MultiplayerSpawner);
-		GDREGISTER_CLASS(MultiplayerSynchronizer);
-		GDREGISTER_CLASS(OfflineMultiplayerPeer);
-		GDREGISTER_CLASS(SceneMultiplayer);
-		if constexpr (GD_IS_CLASS_ENABLED(MultiplayerAPI)) {
-			MultiplayerAPI::set_default_interface("SceneMultiplayer");
-			MultiplayerDebugger::initialize();
-		}
-	}
-#ifdef TOOLS_ENABLED
-	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
-		EditorPlugins::add_by_type<MultiplayerEditorPlugin>();
-	}
-#endif
-}
+protected:
+	static void _bind_methods();
 
-void uninitialize_multiplayer_module(ModuleInitializationLevel p_level) {
-	if constexpr (GD_IS_CLASS_ENABLED(MultiplayerAPI)) {
-		MultiplayerDebugger::deinitialize();
-	}
-}
+public:
+	void set_tick_rate(int p_tick_rate);
+	int get_tick_rate() const;
+
+	double get_tick_delta() const;
+
+	void set_interpolation_delay_ticks(int p_delay);
+	int get_interpolation_delay_ticks() const;
+
+	void reset();
+	int advance(double p_delta);
+
+	void set_local_tick(int64_t p_tick);
+	int64_t get_local_tick() const;
+
+	void observe_server_tick(int64_t p_tick);
+	int64_t get_observed_server_tick() const;
+
+	int64_t get_render_tick() const;
+	double get_render_fraction() const;
+	double get_render_tick_time() const;
+};

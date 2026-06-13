@@ -8,6 +8,9 @@ def configure(env):
 
 def get_doc_classes():
     return [
+        "MultiplayerPredictedBody3D",
+        "MultiplayerSimulationClock",
+        "MultiplayerSnapshotBuffer3D",
         "SceneReplicationConfig",
         "SceneMultiplayer",
         "MultiplayerSpawner",

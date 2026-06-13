@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  multiplayer_snapshot_buffer_3d.h                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,48 +28,51 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
+#pragma once
 
-#include "multiplayer_debugger.h"
-#include "multiplayer_predicted_body_3d.h"
-#include "multiplayer_simulation_clock.h"
-#include "multiplayer_spawner.h"
-#include "multiplayer_snapshot_buffer_3d.h"
-#include "multiplayer_synchronizer.h"
-#include "scene_multiplayer.h"
-#include "scene_replication_interface.h"
-#include "scene_rpc_interface.h"
+#include "core/math/transform_3d.h"
+#include "core/object/ref_counted.h"
+#include "core/templates/hash_map.h"
+#include "core/templates/vector.h"
 
-#include "core/object/class_db.h"
+class MultiplayerSnapshotBuffer3D : public RefCounted {
+	GDCLASS(MultiplayerSnapshotBuffer3D, RefCounted);
 
-#ifdef TOOLS_ENABLED
-#include "editor/multiplayer_editor_plugin.h"
-#endif
+	struct Snapshot {
+		int64_t tick = 0;
+		Transform3D transform;
+		Vector3 linear_velocity;
+		bool teleport = false;
+	};
 
-void initialize_multiplayer_module(ModuleInitializationLevel p_level) {
-	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
-		GDREGISTER_CLASS(MultiplayerSimulationClock);
-		GDREGISTER_CLASS(MultiplayerSnapshotBuffer3D);
-		GDREGISTER_CLASS(MultiplayerPredictedBody3D);
-		GDREGISTER_CLASS(SceneReplicationConfig);
-		GDREGISTER_CLASS(MultiplayerSpawner);
-		GDREGISTER_CLASS(MultiplayerSynchronizer);
-		GDREGISTER_CLASS(OfflineMultiplayerPeer);
-		GDREGISTER_CLASS(SceneMultiplayer);
-		if constexpr (GD_IS_CLASS_ENABLED(MultiplayerAPI)) {
-			MultiplayerAPI::set_default_interface("SceneMultiplayer");
-			MultiplayerDebugger::initialize();
-		}
-	}
-#ifdef TOOLS_ENABLED
-	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
-		EditorPlugins::add_by_type<MultiplayerEditorPlugin>();
-	}
-#endif
-}
+	HashMap<int64_t, Vector<Snapshot>> snapshots;
+	int max_snapshots = 32;
+	int max_extrapolation_ticks = 2;
+	int tick_rate = 30;
 
-void uninitialize_multiplayer_module(ModuleInitializationLevel p_level) {
-	if constexpr (GD_IS_CLASS_ENABLED(MultiplayerAPI)) {
-		MultiplayerDebugger::deinitialize();
-	}
-}
+	Dictionary _sample_empty() const;
+	Dictionary _sample_snapshot(const Snapshot &p_snapshot, const StringName &p_mode) const;
+	Vector<Snapshot> *_get_entity_snapshots(int64_t p_entity_id);
+	const Vector<Snapshot> *_get_entity_snapshots(int64_t p_entity_id) const;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_tick_rate(int p_tick_rate);
+	int get_tick_rate() const;
+	double get_tick_delta() const;
+
+	void set_max_snapshots(int p_max_snapshots);
+	int get_max_snapshots() const;
+
+	void set_max_extrapolation_ticks(int p_max_ticks);
+	int get_max_extrapolation_ticks() const;
+
+	void clear(int64_t p_entity_id = -1);
+	bool push_transform(int64_t p_entity_id, int64_t p_tick, const Transform3D &p_transform, const Vector3 &p_linear_velocity = Vector3(), bool p_teleport = false);
+	Dictionary sample_transform(int64_t p_entity_id, double p_render_tick) const;
+
+	int get_snapshot_count(int64_t p_entity_id) const;
+	int64_t get_latest_tick(int64_t p_entity_id) const;
+};

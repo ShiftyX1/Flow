@@ -28,6 +28,11 @@ private:
 	float block_size = 1.0f;
 	int sea_level = 52;
 	int chunks_per_frame = 4; // Max chunks to integrate into scene tree per frame.
+	int max_pending_chunk_tasks = 16; // Max background chunk generation tasks in flight.
+	int chunk_requests_per_frame = 8; // Max new chunk generation tasks to enqueue per frame.
+	int remesh_requests_per_frame = 4; // Max deferred remesh tasks to enqueue per frame.
+	int remeshes_per_frame = 2; // Max remesh results to apply per frame.
+	int chunk_integration_time_budget_usec = 2000; // Main-thread mesh integration budget.
 	BaseMaterial3D::TextureFilter texture_filter = BaseMaterial3D::TEXTURE_FILTER_NEAREST;
 	bool verbose_logging = true;
 
@@ -70,7 +75,11 @@ private:
 	HashMap<Vector2i, Vector<uint16_t>> pending_saved_chunk_blocks;
 	Ref<StandardMaterial3D> material;
 	Ref<Shader> voxel_shader;
-	Ref<ShaderMaterial> voxel_shader_material;
+	Ref<ShaderMaterial> voxel_untextured_shader_material;
+	HashMap<Ref<Texture2D>, Ref<ShaderMaterial>> voxel_textured_shader_material_cache;
+	HashMap<Ref<Texture2D>, Ref<StandardMaterial3D>> standard_texture_material_cache;
+	HashMap<Ref<Texture2D>, Ref<StandardMaterial3D>> standard_alpha_texture_material_cache;
+	float last_voxel_sun_intensity = -1.0f;
 
 	String world_save_dir;
 	Dictionary world_save_metadata;
@@ -101,6 +110,10 @@ private:
 	// Finished results waiting to be integrated on the main thread.
 	Mutex finished_mutex;
 	Vector<ChunkTaskResult> finished_chunks;
+	int last_integrated_load_count = 0;
+	int last_integrated_remesh_count = 0;
+	int last_remesh_request_count = 0;
+	int last_integration_time_usec = 0;
 
 	// Background task entry point (static, thread-safe).
 	struct ChunkTaskData {
@@ -127,6 +140,11 @@ private:
 	void _request_remesh(const Vector2i &p_key);
 	// Build mesh on main thread (used only for immediate response in set_block_at).
 	void _rebuild_chunk_mesh(VoxelChunk *p_chunk);
+	int _request_missing_chunks_around(const Vector2i &p_center, int p_radius);
+	Vector<Vector2i> _sorted_chunk_keys_by_distance(const Vector2i &p_center, int p_radius) const;
+	Ref<ShaderMaterial> _get_voxel_shader_material(const Ref<Texture2D> &p_texture);
+	Ref<StandardMaterial3D> _get_standard_texture_material(const Ref<Texture2D> &p_texture, bool p_alpha_scissor);
+	void _ensure_voxel_global_shader_parameter(float p_value);
 
 	// Block-emitting light nodes (OmniLight3D per emissive block in loaded chunks).
 	HashMap<Vector3i, OmniLight3D *> block_lights;
@@ -167,6 +185,24 @@ public:
 
 	void set_chunk_load_radius(int p_radius);
 	int get_chunk_load_radius() const { return chunk_load_radius; }
+
+	void set_chunks_per_frame(int p_count);
+	int get_chunks_per_frame() const { return chunks_per_frame; }
+
+	void set_max_pending_chunk_tasks(int p_count);
+	int get_max_pending_chunk_tasks() const { return max_pending_chunk_tasks; }
+
+	void set_chunk_requests_per_frame(int p_count);
+	int get_chunk_requests_per_frame() const { return chunk_requests_per_frame; }
+
+	void set_remesh_requests_per_frame(int p_count);
+	int get_remesh_requests_per_frame() const { return remesh_requests_per_frame; }
+
+	void set_remeshes_per_frame(int p_count);
+	int get_remeshes_per_frame() const { return remeshes_per_frame; }
+
+	void set_chunk_integration_time_budget_usec(int p_usec);
+	int get_chunk_integration_time_budget_usec() const { return chunk_integration_time_budget_usec; }
 
 	void set_block_size(float p_size);
 	float get_block_size() const { return block_size; }
@@ -255,6 +291,7 @@ public:
 	void request_chunks_around(const Vector3 &p_world_position, int p_radius = -1);
 	Dictionary get_chunk_region_load_status(const Vector3 &p_world_position, int p_radius = -1);
 	bool is_chunk_region_loaded(const Vector3 &p_world_position, int p_radius = -1);
+	Dictionary get_debug_metrics();
 
 	// Move an AABB body through the voxel world with collision.
 	// Returns Dictionary: { "position": Vector3, "velocity": Vector3, "on_ground": bool, "in_water": bool }

@@ -7,10 +7,14 @@
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/object/worker_thread_pool.h"
+#include "core/os/os.h"
 #include "core/os/time.h"
 #include "core/string/print_string.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/main/viewport.h"
+#include "servers/rendering/rendering_server.h"
+
+static bool voxel_global_shader_parameter_registered = false;
 
 void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &VoxelWorld::set_seed);
@@ -18,6 +22,18 @@ void VoxelWorld::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_chunk_load_radius", "radius"), &VoxelWorld::set_chunk_load_radius);
 	ClassDB::bind_method(D_METHOD("get_chunk_load_radius"), &VoxelWorld::get_chunk_load_radius);
+	ClassDB::bind_method(D_METHOD("set_chunks_per_frame", "count"), &VoxelWorld::set_chunks_per_frame);
+	ClassDB::bind_method(D_METHOD("get_chunks_per_frame"), &VoxelWorld::get_chunks_per_frame);
+	ClassDB::bind_method(D_METHOD("set_max_pending_chunk_tasks", "count"), &VoxelWorld::set_max_pending_chunk_tasks);
+	ClassDB::bind_method(D_METHOD("get_max_pending_chunk_tasks"), &VoxelWorld::get_max_pending_chunk_tasks);
+	ClassDB::bind_method(D_METHOD("set_chunk_requests_per_frame", "count"), &VoxelWorld::set_chunk_requests_per_frame);
+	ClassDB::bind_method(D_METHOD("get_chunk_requests_per_frame"), &VoxelWorld::get_chunk_requests_per_frame);
+	ClassDB::bind_method(D_METHOD("set_remesh_requests_per_frame", "count"), &VoxelWorld::set_remesh_requests_per_frame);
+	ClassDB::bind_method(D_METHOD("get_remesh_requests_per_frame"), &VoxelWorld::get_remesh_requests_per_frame);
+	ClassDB::bind_method(D_METHOD("set_remeshes_per_frame", "count"), &VoxelWorld::set_remeshes_per_frame);
+	ClassDB::bind_method(D_METHOD("get_remeshes_per_frame"), &VoxelWorld::get_remeshes_per_frame);
+	ClassDB::bind_method(D_METHOD("set_chunk_integration_time_budget_usec", "usec"), &VoxelWorld::set_chunk_integration_time_budget_usec);
+	ClassDB::bind_method(D_METHOD("get_chunk_integration_time_budget_usec"), &VoxelWorld::get_chunk_integration_time_budget_usec);
 
 	ClassDB::bind_method(D_METHOD("set_block_size", "size"), &VoxelWorld::set_block_size);
 	ClassDB::bind_method(D_METHOD("get_block_size"), &VoxelWorld::get_block_size);
@@ -78,6 +94,7 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_chunks_around", "world_position", "radius"), &VoxelWorld::request_chunks_around, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("get_chunk_region_load_status", "world_position", "radius"), &VoxelWorld::get_chunk_region_load_status, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("is_chunk_region_loaded", "world_position", "radius"), &VoxelWorld::is_chunk_region_loaded, DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("get_debug_metrics"), &VoxelWorld::get_debug_metrics);
 	ClassDB::bind_method(D_METHOD("move_body", "body", "velocity", "delta"), &VoxelWorld::move_body);
 	ClassDB::bind_method(D_METHOD("create_world_save", "save_dir", "display_name", "save_seed", "player_state", "character_state"), &VoxelWorld::create_world_save, DEFVAL(-1), DEFVAL(Dictionary()), DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("load_world_save", "save_dir"), &VoxelWorld::load_world_save);
@@ -91,6 +108,12 @@ void VoxelWorld::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed", PROPERTY_HINT_RANGE, "-1,2147483647,1"), "set_seed", "get_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_load_radius", PROPERTY_HINT_RANGE, "2,16,1"), "set_chunk_load_radius", "get_chunk_load_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunks_per_frame", PROPERTY_HINT_RANGE, "1,16,1"), "set_chunks_per_frame", "get_chunks_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_pending_chunk_tasks", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_pending_chunk_tasks", "get_max_pending_chunk_tasks");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_requests_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_chunk_requests_per_frame", "get_chunk_requests_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "remesh_requests_per_frame", PROPERTY_HINT_RANGE, "0,64,1"), "set_remesh_requests_per_frame", "get_remesh_requests_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "remeshes_per_frame", PROPERTY_HINT_RANGE, "1,16,1"), "set_remeshes_per_frame", "get_remeshes_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_integration_time_budget_usec", PROPERTY_HINT_RANGE, "0,10000,100,suffix:usec"), "set_chunk_integration_time_budget_usec", "get_chunk_integration_time_budget_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "block_size", PROPERTY_HINT_RANGE, "0.1,10.0,0.1"), "set_block_size", "get_block_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sea_level", PROPERTY_HINT_RANGE, "0,191,1"), "set_sea_level", "get_sea_level");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
@@ -152,6 +175,30 @@ void VoxelWorld::set_chunk_load_radius(int p_radius) {
 	chunk_load_radius = CLAMP(p_radius, 2, 16);
 }
 
+void VoxelWorld::set_chunks_per_frame(int p_count) {
+	chunks_per_frame = CLAMP(p_count, 1, 16);
+}
+
+void VoxelWorld::set_max_pending_chunk_tasks(int p_count) {
+	max_pending_chunk_tasks = CLAMP(p_count, 1, 128);
+}
+
+void VoxelWorld::set_chunk_requests_per_frame(int p_count) {
+	chunk_requests_per_frame = CLAMP(p_count, 1, 64);
+}
+
+void VoxelWorld::set_remesh_requests_per_frame(int p_count) {
+	remesh_requests_per_frame = CLAMP(p_count, 0, 64);
+}
+
+void VoxelWorld::set_remeshes_per_frame(int p_count) {
+	remeshes_per_frame = CLAMP(p_count, 1, 16);
+}
+
+void VoxelWorld::set_chunk_integration_time_budget_usec(int p_usec) {
+	chunk_integration_time_budget_usec = CLAMP(p_usec, 0, 10000);
+}
+
 void VoxelWorld::set_block_size(float p_size) {
 	block_size = CLAMP(p_size, 0.1f, 10.0f);
 }
@@ -165,6 +212,8 @@ void VoxelWorld::set_sea_level(int p_level) {
 
 void VoxelWorld::set_texture_filter(BaseMaterial3D::TextureFilter p_filter) {
 	texture_filter = p_filter;
+	standard_texture_material_cache.clear();
+	standard_alpha_texture_material_cache.clear();
 }
 
 void VoxelWorld::set_block_registry(const Ref<VoxelBlockRegistry> &p_registry) {
@@ -343,6 +392,22 @@ void VoxelWorld::set_time_speed(float p_speed) {
 	time_speed = CLAMP(p_speed, 0.0f, 100.0f);
 }
 
+void VoxelWorld::_ensure_voxel_global_shader_parameter(float p_value) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	const StringName param_name("voxel_sun_intensity");
+	if (!voxel_global_shader_parameter_registered) {
+		rs->global_shader_parameter_add(param_name, RSE::GLOBAL_VAR_TYPE_FLOAT, p_value);
+		voxel_global_shader_parameter_registered = true;
+	}
+	if (!Math::is_equal_approx(last_voxel_sun_intensity, p_value)) {
+		rs->global_shader_parameter_set(param_name, p_value);
+		last_voxel_sun_intensity = p_value;
+	}
+}
+
 // Compute a smooth factor for how "daytime" it is. 1.0 = full day, 0.0 = full night.
 static float _compute_day_factor(float p_time) {
 	// Sunrise at 5-7, sunset at 17-19. Smooth transitions.
@@ -516,28 +581,9 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 		}
 	}
 
-	// Update voxel shader sun_intensity so voxel lighting tracks day/night.
-	if (voxel_shader_material.is_valid()) {
-		voxel_shader_material->set_shader_parameter("sun_intensity", day_factor);
-
-		// Push updated sun_intensity to all live chunk surface materials.
-		for (const KeyValue<Vector2i, VoxelChunk *> &E : loaded_chunks) {
-			MeshInstance3D *mi = E.value->get_mesh_instance();
-			if (!mi) {
-				continue;
-			}
-			Ref<Mesh> mesh = mi->get_mesh();
-			if (mesh.is_null()) {
-				continue;
-			}
-			for (int s = 0; s < mesh->get_surface_count(); s++) {
-				Ref<ShaderMaterial> sm = mesh->surface_get_material(s);
-				if (sm.is_valid() && sm->get_shader() == voxel_shader) {
-					sm->set_shader_parameter("sun_intensity", day_factor);
-				}
-			}
-		}
-	}
+	// Voxel chunk materials read this as a global shader uniform. Updating a
+	// single render-server parameter avoids touching every chunk surface.
+	_ensure_voxel_global_shader_parameter(day_factor);
 }
 
 void VoxelWorld::_notification(int p_what) {
@@ -687,12 +733,13 @@ void VoxelWorld::_initialize_world() {
 
 	// Create voxel lighting shader + material.
 	{
+		_ensure_voxel_global_shader_parameter(1.0f);
 		voxel_shader.instantiate();
 		String shader_code = R"(
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
 uniform sampler2D texture_albedo : source_color, filter_nearest, repeat_enable;
-uniform float sun_intensity : hint_range(0.0, 1.0) = 1.0;
+global uniform float voxel_sun_intensity;
 uniform bool use_texture = false;
 varying vec4 voxel_light;
 void vertex() {
@@ -702,7 +749,7 @@ void fragment() {
 	vec4 base = use_texture ? texture(texture_albedo, UV) : vec4(1.0);
 	ALBEDO = base.rgb * COLOR.rgb;
 	// Sunlight modulation + AO. Block light is handled by OmniLight3D nodes.
-	float sun = voxel_light.r * sun_intensity;
+	float sun = voxel_light.r * voxel_sun_intensity;
 	float ao = voxel_light.b;
 	float brightness = sun * ao;
 	// Minimum ambient so caves are never pitch black.
@@ -715,10 +762,6 @@ void fragment() {
 }
 )";
 		voxel_shader->set_code(shader_code);
-		voxel_shader_material.instantiate();
-		voxel_shader_material->set_shader(voxel_shader);
-		voxel_shader_material->set_shader_parameter("sun_intensity", 1.0f);
-		voxel_shader_material->set_shader_parameter("use_texture", false);
 	}
 
 	initialized = true;
@@ -775,12 +818,66 @@ void VoxelWorld::_cleanup_world() {
 
 	material.unref();
 	voxel_shader.unref();
-	voxel_shader_material.unref();
+	voxel_untextured_shader_material.unref();
+	voxel_textured_shader_material_cache.clear();
+	standard_texture_material_cache.clear();
+	standard_alpha_texture_material_cache.clear();
+	last_voxel_sun_intensity = -1.0f;
 	initialized = false;
 	last_camera_chunk = Vector2i(INT32_MAX, INT32_MAX);
 	if (verbose_logging) {
 		print_line("[VoxelWorld] Cleanup complete.");
 	}
+}
+
+Vector<Vector2i> VoxelWorld::_sorted_chunk_keys_by_distance(const Vector2i &p_center, int p_radius) const {
+	Vector<Vector2i> keys;
+	keys.reserve((p_radius * 2 + 1) * (p_radius * 2 + 1));
+	for (int dx = -p_radius; dx <= p_radius; dx++) {
+		for (int dz = -p_radius; dz <= p_radius; dz++) {
+			keys.push_back(Vector2i(p_center.x + dx, p_center.y + dz));
+		}
+	}
+
+	for (int i = 1; i < keys.size(); i++) {
+		const Vector2i key = keys[i];
+		const int dx = key.x - p_center.x;
+		const int dz = key.y - p_center.y;
+		const int distance_sq = dx * dx + dz * dz;
+		int j = i - 1;
+		while (j >= 0) {
+			const Vector2i other = keys[j];
+			const int other_dx = other.x - p_center.x;
+			const int other_dz = other.y - p_center.y;
+			const int other_distance_sq = other_dx * other_dx + other_dz * other_dz;
+			if (other_distance_sq < distance_sq || (other_distance_sq == distance_sq && (other.x < key.x || (other.x == key.x && other.y <= key.y)))) {
+				break;
+			}
+			keys.write[j + 1] = other;
+			j--;
+		}
+		keys.write[j + 1] = key;
+	}
+	return keys;
+}
+
+int VoxelWorld::_request_missing_chunks_around(const Vector2i &p_center, int p_radius) {
+	const int capacity = MAX(0, max_pending_chunk_tasks - pending_chunks.size());
+	const int request_budget = MIN(chunk_requests_per_frame, capacity);
+	if (request_budget <= 0) {
+		return 0;
+	}
+
+	int requested_count = 0;
+	const Vector<Vector2i> desired_keys = _sorted_chunk_keys_by_distance(p_center, p_radius);
+	for (int i = 0; i < desired_keys.size() && requested_count < request_budget; i++) {
+		const Vector2i key = desired_keys[i];
+		if (!loaded_chunks.has(key) && !pending_chunks.has(key)) {
+			_request_chunk(key.x, key.y);
+			requested_count++;
+		}
+	}
+	return requested_count;
 }
 
 void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
@@ -793,6 +890,7 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 	Vector2i current_chunk(cam_cx, cam_cz);
 
 	if (current_chunk == last_camera_chunk) {
+		_request_missing_chunks_around(current_chunk, chunk_load_radius);
 		return;
 	}
 	if (verbose_logging) {
@@ -831,13 +929,7 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 		pending_chunks.erase(pending_to_cancel[i]);
 	}
 
-	int requested_count = 0;
-	for (const KeyValue<Vector2i, bool> &E : desired_chunks) {
-		if (!loaded_chunks.has(E.key) && !pending_chunks.has(E.key)) {
-			_request_chunk(E.key.x, E.key.y);
-			requested_count++;
-		}
-	}
+	int requested_count = _request_missing_chunks_around(current_chunk, chunk_load_radius);
 	if (requested_count > 0 && verbose_logging) {
 		print_line("[VoxelWorld] Requested " + itos(requested_count) + " chunks for background generation. Pending: " + itos(pending_chunks.size()) + ".");
 	}
@@ -860,14 +952,7 @@ void VoxelWorld::request_chunks_around(const Vector3 &p_world_position, int p_ra
 
 	const int radius = _effective_chunk_region_radius(p_radius);
 	const Vector2i center = _world_to_chunk(p_world_position);
-	for (int dx = -radius; dx <= radius; dx++) {
-		for (int dz = -radius; dz <= radius; dz++) {
-			const Vector2i key(center.x + dx, center.y + dz);
-			if (!loaded_chunks.has(key) && !pending_chunks.has(key)) {
-				_request_chunk(key.x, key.y);
-			}
-		}
-	}
+	_request_missing_chunks_around(center, radius);
 }
 
 Dictionary VoxelWorld::get_chunk_region_load_status(const Vector3 &p_world_position, int p_radius) {
@@ -912,6 +997,41 @@ Dictionary VoxelWorld::get_chunk_region_load_status(const Vector3 &p_world_posit
 bool VoxelWorld::is_chunk_region_loaded(const Vector3 &p_world_position, int p_radius) {
 	const Dictionary status = get_chunk_region_load_status(p_world_position, p_radius);
 	return (bool)status["ready"];
+}
+
+Dictionary VoxelWorld::get_debug_metrics() {
+	int finished_load_count = 0;
+	int finished_remesh_count = 0;
+	{
+		MutexLock lock(finished_mutex);
+		for (int i = 0; i < finished_chunks.size(); i++) {
+			if (finished_chunks[i].is_remesh) {
+				finished_remesh_count++;
+			} else {
+				finished_load_count++;
+			}
+		}
+	}
+
+	Dictionary metrics;
+	metrics["loaded_chunks"] = loaded_chunks.size();
+	metrics["pending_chunk_tasks"] = pending_chunks.size();
+	metrics["pending_remesh_tasks"] = pending_remesh.size();
+	metrics["finished_chunk_results"] = finished_load_count;
+	metrics["finished_remesh_results"] = finished_remesh_count;
+	metrics["dirty_light_chunks"] = dirty_light.size();
+	metrics["max_pending_chunk_tasks"] = max_pending_chunk_tasks;
+	metrics["chunk_requests_per_frame"] = chunk_requests_per_frame;
+	metrics["chunks_per_frame"] = chunks_per_frame;
+	metrics["remesh_requests_per_frame"] = remesh_requests_per_frame;
+	metrics["remeshes_per_frame"] = remeshes_per_frame;
+	metrics["integration_time_budget_usec"] = chunk_integration_time_budget_usec;
+	metrics["last_integrated_loads"] = last_integrated_load_count;
+	metrics["last_integrated_remeshes"] = last_integrated_remesh_count;
+	metrics["last_remesh_requests"] = last_remesh_request_count;
+	metrics["last_integration_time_usec"] = last_integration_time_usec;
+	metrics["material_cache_size"] = voxel_textured_shader_material_cache.size() + standard_texture_material_cache.size() + standard_alpha_texture_material_cache.size() + (voxel_untextured_shader_material.is_valid() ? 1 : 0);
+	return metrics;
 }
 
 // Background chunk generation
@@ -987,6 +1107,9 @@ void VoxelWorld::_request_chunk(int p_cx, int p_cz) {
 	if (loaded_chunks.has(key) || pending_chunks.has(key)) {
 		return;
 	}
+	if (pending_chunks.size() >= max_pending_chunk_tasks) {
+		return;
+	}
 
 	ChunkTaskData *task_data = memnew(ChunkTaskData);
 	task_data->world = this;
@@ -1020,18 +1143,64 @@ void VoxelWorld::_request_chunk(int p_cx, int p_cz) {
 
 // ----- Chunk mesh helpers -----
 
-void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<VoxelMesher::MeshSurface> &p_surfaces) {
-	// Remove old mesh instance if any.
-	MeshInstance3D *old_mi = p_chunk->get_mesh_instance();
-	if (old_mi) {
-		if (old_mi->get_parent() == this) {
-			remove_child(old_mi);
-		}
-		memdelete(old_mi);
-		p_chunk->set_mesh_instance(nullptr);
+Ref<ShaderMaterial> VoxelWorld::_get_voxel_shader_material(const Ref<Texture2D> &p_texture) {
+	if (voxel_shader.is_null()) {
+		return Ref<ShaderMaterial>();
 	}
 
+	if (p_texture.is_valid()) {
+		Ref<ShaderMaterial> *cached = voxel_textured_shader_material_cache.getptr(p_texture);
+		if (cached != nullptr && cached->is_valid()) {
+			return *cached;
+		}
+
+		Ref<ShaderMaterial> mat;
+		mat.instantiate();
+		mat->set_shader(voxel_shader);
+		mat->set_shader_parameter("texture_albedo", p_texture);
+		mat->set_shader_parameter("use_texture", true);
+		voxel_textured_shader_material_cache[p_texture] = mat;
+		return mat;
+	}
+
+	if (voxel_untextured_shader_material.is_null()) {
+		voxel_untextured_shader_material.instantiate();
+		voxel_untextured_shader_material->set_shader(voxel_shader);
+		voxel_untextured_shader_material->set_shader_parameter("use_texture", false);
+	}
+	return voxel_untextured_shader_material;
+}
+
+Ref<StandardMaterial3D> VoxelWorld::_get_standard_texture_material(const Ref<Texture2D> &p_texture, bool p_alpha_scissor) {
+	if (p_texture.is_null()) {
+		return Ref<StandardMaterial3D>();
+	}
+
+	HashMap<Ref<Texture2D>, Ref<StandardMaterial3D>> &cache = p_alpha_scissor ? standard_alpha_texture_material_cache : standard_texture_material_cache;
+	Ref<StandardMaterial3D> *cached = cache.getptr(p_texture);
+	if (cached != nullptr && cached->is_valid()) {
+		return *cached;
+	}
+
+	Ref<StandardMaterial3D> mat;
+	mat.instantiate();
+	mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, p_texture);
+	mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+	mat->set_texture_filter(texture_filter);
+	if (p_alpha_scissor) {
+		mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+		mat->set_alpha_scissor_threshold(0.5f);
+	}
+	cache[p_texture] = mat;
+	return mat;
+}
+
+void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<VoxelMesher::MeshSurface> &p_surfaces) {
 	if (p_surfaces.size() == 0) {
+		MeshInstance3D *mi = p_chunk->get_mesh_instance();
+		if (mi) {
+			mi->set_mesh(Ref<Mesh>());
+		}
 		return;
 	}
 
@@ -1047,48 +1216,30 @@ void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<Voxe
 				mat->set_shader_parameter("texture_albedo", p_surfaces[s].texture);
 			}
 			array_mesh->surface_set_material(s, mat);
-		} else if (fmt_flags != 0 && voxel_shader_material.is_valid()) {
+		} else if (fmt_flags != 0 && voxel_shader.is_valid()) {
 			// Surface has CUSTOM0 light data — use voxel lighting shader.
-			Ref<ShaderMaterial> mat;
-			mat.instantiate();
-			mat->set_shader(voxel_shader);
-			mat->set_shader_parameter("sun_intensity", voxel_shader_material->get_shader_parameter("sun_intensity"));
-			if (p_surfaces[s].texture.is_valid()) {
-				mat->set_shader_parameter("texture_albedo", p_surfaces[s].texture);
-				mat->set_shader_parameter("use_texture", true);
-			} else {
-				mat->set_shader_parameter("use_texture", false);
-			}
-			array_mesh->surface_set_material(s, mat);
+			array_mesh->surface_set_material(s, _get_voxel_shader_material(p_surfaces[s].texture));
 		} else if (p_surfaces[s].texture.is_valid()) {
-			Ref<StandardMaterial3D> mat;
-			mat.instantiate();
-			mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, p_surfaces[s].texture);
-			mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
-			mat->set_texture_filter(texture_filter);
-
 			int btype = p_surfaces[s].block_type;
-			if (btype >= 0 && block_registry.is_valid() && block_registry->is_uses_alpha(btype)) {
-				mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-				mat->set_alpha_scissor_threshold(0.5f);
-			}
-			array_mesh->surface_set_material(s, mat);
+			bool alpha_scissor = btype >= 0 && block_registry.is_valid() && block_registry->is_uses_alpha(btype);
+			array_mesh->surface_set_material(s, _get_standard_texture_material(p_surfaces[s].texture, alpha_scissor));
 		} else if (material.is_valid()) {
 			array_mesh->surface_set_material(s, material);
 		}
 	}
 
-	MeshInstance3D *mi = memnew(MeshInstance3D);
+	MeshInstance3D *mi = p_chunk->get_mesh_instance();
+	if (mi == nullptr) {
+		mi = memnew(MeshInstance3D);
+		Vector2i cpos = p_chunk->get_chunk_pos();
+		float world_x = cpos.x * VoxelChunk::SIZE_X * block_size;
+		float world_z = cpos.y * VoxelChunk::SIZE_Z * block_size;
+		mi->set_position(Vector3(world_x, 0, world_z));
+		p_chunk->set_mesh_instance(mi);
+		add_child(mi);
+		mi->set_owner(nullptr);
+	}
 	mi->set_mesh(array_mesh);
-
-	Vector2i cpos = p_chunk->get_chunk_pos();
-	float world_x = cpos.x * VoxelChunk::SIZE_X * block_size;
-	float world_z = cpos.y * VoxelChunk::SIZE_Z * block_size;
-	mi->set_position(Vector3(world_x, 0, world_z));
-
-	p_chunk->set_mesh_instance(mi);
-	add_child(mi);
-	mi->set_owner(nullptr);
 }
 
 // ---- Block light (OmniLight3D) management ----
@@ -1233,21 +1384,52 @@ void VoxelWorld::_request_remesh(const Vector2i &p_key) {
 
 void VoxelWorld::_integrate_finished_chunks() {
 	Vector<ChunkTaskResult> to_integrate;
+	last_integrated_load_count = 0;
+	last_integrated_remesh_count = 0;
+	last_remesh_request_count = 0;
+	const uint64_t start_usec = OS::get_singleton()->get_ticks_usec();
 
 	{
 		MutexLock lock(finished_mutex);
 		if (finished_chunks.is_empty()) {
-			return;
+			last_integration_time_usec = 0;
+		} else {
+			to_integrate = finished_chunks;
+			finished_chunks.clear();
 		}
-		to_integrate = finished_chunks;
-		finished_chunks.clear();
 	}
 
 	int integrated = 0;
+	int integrated_remesh = 0;
+	HashSet<Vector2i> integrated_keys_this_frame;
+	auto defer_remaining = [&](int p_from_index) {
+		if (p_from_index >= to_integrate.size()) {
+			return;
+		}
+		MutexLock lock(finished_mutex);
+		Vector<ChunkTaskResult> newly_finished = finished_chunks;
+		finished_chunks.clear();
+		for (int j = p_from_index; j < to_integrate.size(); j++) {
+			finished_chunks.push_back(to_integrate[j]);
+		}
+		for (int j = 0; j < newly_finished.size(); j++) {
+			finished_chunks.push_back(newly_finished[j]);
+		}
+	};
 	for (int i = 0; i < to_integrate.size(); i++) {
+		if (chunk_integration_time_budget_usec > 0 &&
+				(integrated + integrated_remesh) > 0 &&
+				(int)(OS::get_singleton()->get_ticks_usec() - start_usec) >= chunk_integration_time_budget_usec) {
+			defer_remaining(i);
+			break;
+		}
 		const ChunkTaskResult &result = to_integrate[i];
 
 		if (result.is_remesh) {
+			if (integrated_remesh >= remeshes_per_frame) {
+				defer_remaining(i);
+				break;
+			}
 			// Complete the remesh task.
 			int64_t *task_id_ptr = pending_remesh.getptr(result.key);
 			if (task_id_ptr) {
@@ -1261,8 +1443,14 @@ void VoxelWorld::_integrate_finished_chunks() {
 					(*chunk_ptr)->set_light_data(result.light_data);
 				}
 				_apply_surfaces_to_chunk(*chunk_ptr, result.surfaces);
+				integrated_remesh++;
+				integrated_keys_this_frame.insert(result.key);
 			}
-			// Remesh results don't count toward the per-frame integration limit.
+			if (chunk_integration_time_budget_usec > 0 &&
+					(int)(OS::get_singleton()->get_ticks_usec() - start_usec) >= chunk_integration_time_budget_usec) {
+				defer_remaining(i + 1);
+				break;
+			}
 			continue;
 		}
 
@@ -1308,20 +1496,25 @@ void VoxelWorld::_integrate_finished_chunks() {
 		}
 
 		integrated++;
+		integrated_keys_this_frame.insert(result.key);
 
 		if (integrated >= chunks_per_frame) {
-			if (i + 1 < to_integrate.size()) {
-				MutexLock lock(finished_mutex);
-				for (int j = i + 1; j < to_integrate.size(); j++) {
-					finished_chunks.push_back(to_integrate[j]);
-				}
-			}
+			defer_remaining(i + 1);
+			break;
+		}
+		if (chunk_integration_time_budget_usec > 0 &&
+				(int)(OS::get_singleton()->get_ticks_usec() - start_usec) >= chunk_integration_time_budget_usec) {
+			defer_remaining(i + 1);
 			break;
 		}
 	}
 
-	if (integrated > 0 && verbose_logging) {
-		print_verbose("[VoxelWorld] Integrated " + itos(integrated) + " chunks this frame. Total loaded: " + itos(loaded_chunks.size()) + ".");
+	last_integrated_load_count = integrated;
+	last_integrated_remesh_count = integrated_remesh;
+	last_integration_time_usec = (int)(OS::get_singleton()->get_ticks_usec() - start_usec);
+
+	if ((integrated + integrated_remesh) > 0 && verbose_logging) {
+		print_verbose("[VoxelWorld] Integrated loads=" + itos(integrated) + " remeshes=" + itos(integrated_remesh) + " this frame. Total loaded: " + itos(loaded_chunks.size()) + ".");
 	}
 
 	// Process deferred light-dirty chunks: attempt to queue remesh for each.
@@ -1329,6 +1522,10 @@ void VoxelWorld::_integrate_finished_chunks() {
 	if (!dirty_light.is_empty()) {
 		HashSet<Vector2i> still_dirty;
 		for (const Vector2i &key : dirty_light) {
+			if (integrated_keys_this_frame.has(key)) {
+				still_dirty.insert(key);
+				continue;
+			}
 			if (pending_chunks.has(key) || pending_remesh.has(key)) {
 				still_dirty.insert(key);
 				continue;
@@ -1336,7 +1533,12 @@ void VoxelWorld::_integrate_finished_chunks() {
 			if (!loaded_chunks.has(key)) {
 				continue; // Not loaded (yet or anymore) — drop it.
 			}
+			if (last_remesh_request_count >= remesh_requests_per_frame) {
+				still_dirty.insert(key);
+				continue;
+			}
 			_request_remesh(key);
+			last_remesh_request_count++;
 		}
 		dirty_light = still_dirty;
 	}
@@ -1467,6 +1669,7 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 	memdelete(chunk);
 	loaded_chunks.erase(key);
 	pending_remesh.erase(key); // discard any pending remesh; result will be ignored
+	dirty_light.erase(key);
 }
 
 Dictionary VoxelWorld::_build_world_save_metadata(const String &p_display_name, int p_resolved_seed, const Dictionary &p_player_state, const Dictionary &p_character_state) const {

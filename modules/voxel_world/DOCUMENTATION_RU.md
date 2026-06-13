@@ -505,7 +505,7 @@ VoxelLightMap::remove_and_repropagate_sunlight(light_data, blocks, neighbors);
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
 uniform sampler2D texture_albedo : source_color, filter_nearest, repeat_enable;
-uniform float sun_intensity : hint_range(0.0, 1.0) = 1.0;
+global uniform float voxel_sun_intensity;
 uniform bool use_texture = false;
 varying vec4 voxel_light;
 
@@ -516,7 +516,7 @@ void vertex() {
 void fragment() {
     vec4 base = use_texture ? texture(texture_albedo, UV) : vec4(1.0);
     ALBEDO = base.rgb * COLOR.rgb;
-    float sun = voxel_light.r * sun_intensity;
+    float sun = voxel_light.r * voxel_sun_intensity;
     float ao = voxel_light.b;
     float brightness = sun * ao;
     brightness = max(brightness, 0.03);  // Минимальный ambient
@@ -528,7 +528,7 @@ void fragment() {
 }
 ```
 
-`sun_intensity` обновляется системой цикла дня/ночи.
+`voxel_sun_intensity` обновляется системой цикла дня/ночи как глобальный параметр шейдера.
 
 ---
 
@@ -543,6 +543,11 @@ void fragment() {
 |                     | `block_size`          | float                 | 1.0              |
 |                     | `sea_level`           | int                   | 52               |
 |                     | `chunks_per_frame`    | int                   | 4                |
+|                     | `max_pending_chunk_tasks` | int               | 16               |
+|                     | `chunk_requests_per_frame` | int              | 8                |
+|                     | `remesh_requests_per_frame` | int             | 4                |
+|                     | `remeshes_per_frame`  | int                   | 2                |
+|                     | `chunk_integration_time_budget_usec` | int      | 2000             |
 | **Реестры**         | `block_registry`      | VoxelBlockRegistry    | null             |
 |                     | `biome_registry`      | VoxelBiomeRegistry    | null             |
 | **Рендеринг**       | `texture_filter`      | TextureFilter         | NEAREST          |
@@ -601,7 +606,7 @@ world.set_time_of_day(12.0)   # Установить полдень
 - **Солнце** (`DirectionalLight3D` через `sun_path`): вращение, энергия, цветовая температура
 - **Луна** (`DirectionalLight3D` через `moon_path`): вращение, энергия
 - **Окружение** (`WorldEnvironment` через `environment_path`): ambient свет, небо
-- **Шейдер**: uniform `sun_intensity` обновляется каждый кадр
+- **Шейдер**: глобальный параметр `voxel_sun_intensity` обновляется один раз за кадр
 
 ### Система тумана
 

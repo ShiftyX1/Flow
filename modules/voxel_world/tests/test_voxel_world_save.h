@@ -92,6 +92,43 @@ TEST_CASE("[VoxelWorld] Chunk region loading status exposes safe spawn progress"
 	CHECK((int)default_radius_status["total"] == 49);
 }
 
+TEST_CASE("[VoxelWorld] Streaming budgets cap initial chunk task pressure") {
+	VoxelWorld world;
+	world.set_chunk_load_radius(8);
+	world.set_max_pending_chunk_tasks(2);
+	world.set_chunk_requests_per_frame(8);
+	world.set_chunks_per_frame(1);
+	world.set_remesh_requests_per_frame(1);
+	world.set_remeshes_per_frame(1);
+	world.set_chunk_integration_time_budget_usec(1000);
+
+	world.request_chunks_around(Vector3(0, 0, 0), 8);
+
+	Dictionary metrics = world.get_debug_metrics();
+	CHECK((int)metrics["max_pending_chunk_tasks"] == 2);
+	CHECK((int)metrics["chunk_requests_per_frame"] == 8);
+	CHECK((int)metrics["chunks_per_frame"] == 1);
+	CHECK((int)metrics["remesh_requests_per_frame"] == 1);
+	CHECK((int)metrics["remeshes_per_frame"] == 1);
+	CHECK((int)metrics["integration_time_budget_usec"] == 1000);
+	CHECK((int)metrics["pending_chunk_tasks"] <= 2);
+}
+
+TEST_CASE("[VoxelWorld] Debug metrics expose streaming counters") {
+	VoxelWorld world;
+	Dictionary metrics = world.get_debug_metrics();
+	CHECK(metrics.has("loaded_chunks"));
+	CHECK(metrics.has("pending_chunk_tasks"));
+	CHECK(metrics.has("pending_remesh_tasks"));
+	CHECK(metrics.has("finished_chunk_results"));
+	CHECK(metrics.has("finished_remesh_results"));
+	CHECK(metrics.has("dirty_light_chunks"));
+	CHECK(metrics.has("last_integrated_loads"));
+	CHECK(metrics.has("last_integrated_remeshes"));
+	CHECK(metrics.has("last_remesh_requests"));
+	CHECK(metrics.has("last_integration_time_usec"));
+}
+
 TEST_CASE("[VoxelWorld] Loaded save time becomes current and start time") {
 	const String root = "user://voxel_world_time_test";
 	const String metadata_path = VoxelWorldSave::get_metadata_path(root);

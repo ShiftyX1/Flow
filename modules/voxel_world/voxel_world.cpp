@@ -50,6 +50,9 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_biome_registry", "registry"), &VoxelWorld::set_biome_registry);
 	ClassDB::bind_method(D_METHOD("get_biome_registry"), &VoxelWorld::get_biome_registry);
 
+	ClassDB::bind_method(D_METHOD("set_structure_registry", "registry"), &VoxelWorld::set_structure_registry);
+	ClassDB::bind_method(D_METHOD("get_structure_registry"), &VoxelWorld::get_structure_registry);
+
 	ClassDB::bind_method(D_METHOD("set_verbose_logging", "enabled"), &VoxelWorld::set_verbose_logging);
 	ClassDB::bind_method(D_METHOD("get_verbose_logging"), &VoxelWorld::get_verbose_logging);
 
@@ -88,6 +91,12 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_block_name_at", "world_pos"), &VoxelWorld::get_block_name_at);
 	ClassDB::bind_method(D_METHOD("get_biome_at", "world_pos"), &VoxelWorld::get_biome_at);
 	ClassDB::bind_method(D_METHOD("get_biome_name_at", "world_pos"), &VoxelWorld::get_biome_name_at);
+	ClassDB::bind_method(D_METHOD("add_world_object", "type", "block_pos", "rotation_y", "state", "blocking"), &VoxelWorld::add_world_object, DEFVAL(0.0f), DEFVAL(Dictionary()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("remove_world_object", "id"), &VoxelWorld::remove_world_object);
+	ClassDB::bind_method(D_METHOD("get_world_object", "id"), &VoxelWorld::get_world_object);
+	ClassDB::bind_method(D_METHOD("set_world_object_state", "id", "state"), &VoxelWorld::set_world_object_state);
+	ClassDB::bind_method(D_METHOD("set_world_object_blocking", "id", "blocking"), &VoxelWorld::set_world_object_blocking);
+	ClassDB::bind_method(D_METHOD("get_world_objects_in_chunk", "chunk_pos"), &VoxelWorld::get_world_objects_in_chunk);
 	ClassDB::bind_method(D_METHOD("world_to_block_pos", "world_pos"), &VoxelWorld::world_to_block_pos);
 	ClassDB::bind_method(D_METHOD("block_to_world_pos", "block_pos"), &VoxelWorld::block_to_world_pos);
 	ClassDB::bind_method(D_METHOD("raycast_block", "origin", "direction", "max_distance"), &VoxelWorld::raycast_block, DEFVAL(10.0f));
@@ -119,6 +128,7 @@ void VoxelWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "texture_filter", PROPERTY_HINT_ENUM, "Nearest,Linear,Nearest Mipmap,Linear Mipmap,Nearest Mipmap Anisotropic,Linear Mipmap Anisotropic"), "set_texture_filter", "get_texture_filter");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "block_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBlockRegistry"), "set_block_registry", "get_block_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "biome_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelBiomeRegistry"), "set_biome_registry", "get_biome_registry");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "structure_registry", PROPERTY_HINT_RESOURCE_TYPE, "VoxelStructureRegistry"), "set_structure_registry", "get_structure_registry");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "verbose_logging"), "set_verbose_logging", "get_verbose_logging");
 
 	ADD_GROUP("Chunk Borders", "chunk_border_");
@@ -145,6 +155,9 @@ void VoxelWorld::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("block_placed", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "block_id")));
 	ADD_SIGNAL(MethodInfo("block_broken", PropertyInfo(Variant::VECTOR3I, "block_pos"), PropertyInfo(Variant::INT, "old_block_id")));
+	ADD_SIGNAL(MethodInfo("world_object_added", PropertyInfo(Variant::INT, "object_id"), PropertyInfo(Variant::DICTIONARY, "object")));
+	ADD_SIGNAL(MethodInfo("world_object_removed", PropertyInfo(Variant::INT, "object_id")));
+	ADD_SIGNAL(MethodInfo("world_object_state_changed", PropertyInfo(Variant::INT, "object_id"), PropertyInfo(Variant::DICTIONARY, "state")));
 
 	// Default block ID constants (convenience for GDScript).
 	BIND_CONSTANT(VOXEL_BLOCK_AIR);
@@ -158,6 +171,10 @@ void VoxelWorld::_bind_methods() {
 	BIND_CONSTANT(VOXEL_BLOCK_LEAVES);
 	BIND_CONSTANT(VOXEL_BLOCK_BEDROCK);
 	BIND_CONSTANT(VOXEL_BLOCK_TORCH);
+	BIND_CONSTANT(VOXEL_BLOCK_BIOLUMEN_PLANT);
+	BIND_CONSTANT(VOXEL_BLOCK_BIO_RESIN);
+	BIND_CONSTANT(VOXEL_BLOCK_RUSTED_PANEL);
+	BIND_CONSTANT(VOXEL_BLOCK_BEACON_CORE);
 }
 
 VoxelWorld::VoxelWorld() {
@@ -230,6 +247,14 @@ void VoxelWorld::set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry) {
 
 Ref<VoxelBiomeRegistry> VoxelWorld::get_biome_registry() const {
 	return biome_registry;
+}
+
+void VoxelWorld::set_structure_registry(const Ref<VoxelStructureRegistry> &p_registry) {
+	structure_registry = p_registry;
+}
+
+Ref<VoxelStructureRegistry> VoxelWorld::get_structure_registry() const {
+	return structure_registry;
 }
 
 // --- Day/Night Cycle setters ---
@@ -671,6 +696,14 @@ void VoxelWorld::_initialize_world() {
 	generator->set_seed(effective_seed);
 	generator->set_sea_level(sea_level);
 
+	if (biome_registry.is_null()) {
+		biome_registry.instantiate();
+		biome_registry->setup_defaults();
+		if (verbose_logging) {
+			print_line("[VoxelWorld] No biome registry set - created default biome registry.");
+		}
+	}
+
 	// If a biome registry is set, convert its biomes to runtime data for the generator.
 	if (biome_registry.is_valid() && biome_registry->get_biome_count() > 0) {
 		const Vector<VoxelBiomeRegistry::BiomeEntry> &entries = biome_registry->get_biomes();
@@ -702,7 +735,7 @@ void VoxelWorld::_initialize_world() {
 		// No registry or empty → use built-in defaults.
 		generator->setup_default_biomes();
 		if (verbose_logging) {
-			print_line("[VoxelWorld] No biome registry set — using default 4 biomes.");
+			print_line("[VoxelWorld] Empty biome registry - using built-in biomes.");
 		}
 	}
 
@@ -725,6 +758,14 @@ void VoxelWorld::_initialize_world() {
 
 	// Finalize registry — builds flat cache arrays for thread-safe access.
 	block_registry->finalize();
+
+	if (structure_registry.is_null()) {
+		structure_registry.instantiate();
+		structure_registry->setup_defaults();
+		if (verbose_logging) {
+			print_line("[VoxelWorld] No structure registry set - created default restored forest slice.");
+		}
+	}
 
 	material.instantiate();
 	material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
@@ -801,6 +842,8 @@ void VoxelWorld::_cleanup_world() {
 		_unload_chunk(keys[i].x, keys[i].y);
 	}
 	loaded_chunks.clear();
+	world_objects.clear();
+	object_ids_by_chunk.clear();
 
 	// Safety: remove any block lights not already freed by _unload_chunk.
 	for (const KeyValue<Vector3i, OmniLight3D *> &E : block_lights) {
@@ -1020,6 +1063,8 @@ Dictionary VoxelWorld::get_debug_metrics() {
 	metrics["finished_chunk_results"] = finished_load_count;
 	metrics["finished_remesh_results"] = finished_remesh_count;
 	metrics["dirty_light_chunks"] = dirty_light.size();
+	metrics["world_objects"] = world_objects.size();
+	metrics["dirty_object_chunks"] = dirty_saved_object_chunks.size();
 	metrics["max_pending_chunk_tasks"] = max_pending_chunk_tasks;
 	metrics["chunk_requests_per_frame"] = chunk_requests_per_frame;
 	metrics["chunks_per_frame"] = chunks_per_frame;
@@ -1053,6 +1098,7 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 			const String chunk_path = VoxelWorldSave::get_chunk_file_path(world->world_save_dir, data->key);
 			if (FileAccess::exists(chunk_path) && VoxelWorldSave::load_chunk_file(chunk_path, &saved_blocks) == OK) {
 				result.blocks = saved_blocks;
+				result.blocks_from_save = true;
 			}
 		}
 	}
@@ -1476,8 +1522,18 @@ void VoxelWorld::_integrate_finished_chunks() {
 
 		// Register the chunk and apply the pre-built surfaces (built off-thread).
 		loaded_chunks[result.key] = chunk;
-		_apply_surfaces_to_chunk(chunk, result.surfaces);
+		const bool structures_modified = _apply_structures_to_chunk(result.key, chunk, result.blocks_from_save);
+		if (structures_modified) {
+			_rebuild_chunk_mesh(chunk);
+		} else {
+			_apply_surfaces_to_chunk(chunk, result.surfaces);
+		}
 		_scan_chunk_for_lights(chunk);
+
+		const bool objects_loaded = _load_world_objects_for_chunk(result.key);
+		if (!objects_loaded) {
+			_generate_structure_objects_for_chunk(result.key);
+		}
 
 		// Spawn chunk border visualizer when enabled.
 		if (show_chunk_borders) {
@@ -1642,6 +1698,7 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 
 	VoxelChunk *chunk = *chunk_ptr;
 	_queue_chunk_save_snapshot(key, chunk);
+	_queue_object_save_snapshot(key);
 	MeshInstance3D *mi = chunk->get_mesh_instance();
 	if (mi && mi->get_parent() == this) {
 		remove_child(mi);
@@ -1665,6 +1722,7 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 
 	// Remove chunk border visualizer if enabled.
 	_despawn_chunk_border(key);
+	_remove_world_objects_in_chunk(key, false);
 
 	memdelete(chunk);
 	loaded_chunks.erase(key);
@@ -1781,6 +1839,11 @@ Error VoxelWorld::create_world_save(const String &p_save_dir, const String &p_di
 	world_save_loaded = true;
 	dirty_saved_chunks.clear();
 	pending_saved_chunk_blocks.clear();
+	dirty_saved_object_chunks.clear();
+	pending_saved_chunk_objects.clear();
+	world_objects.clear();
+	object_ids_by_chunk.clear();
+	next_world_object_id = 1;
 
 	err = _write_world_save_metadata();
 	if (err != OK) {
@@ -1808,6 +1871,11 @@ Error VoxelWorld::load_world_save(const String &p_save_dir) {
 	world_save_loaded = true;
 	dirty_saved_chunks.clear();
 	pending_saved_chunk_blocks.clear();
+	dirty_saved_object_chunks.clear();
+	pending_saved_chunk_objects.clear();
+	world_objects.clear();
+	object_ids_by_chunk.clear();
+	next_world_object_id = 1;
 	seed = (int)world_save_metadata.get("seed", seed);
 	const float loaded_time = (float)(double)world_save_metadata.get("world_time", world_save_metadata.get("time_of_day", (double)start_time_of_day));
 	set_start_time_of_day(loaded_time);
@@ -1838,11 +1906,19 @@ Error VoxelWorld::save_world_state(const Dictionary &p_player_state, const Dicti
 	if (err != OK) {
 		return err;
 	}
+	err = _flush_dirty_saved_object_chunks(p_max_dirty_chunks);
+	if (err != OK) {
+		return err;
+	}
 	return _write_world_save_metadata();
 }
 
 Error VoxelWorld::flush_world_save_dirty_chunks(int p_max_chunks) {
-	return _flush_dirty_saved_chunks(p_max_chunks);
+	Error err = _flush_dirty_saved_chunks(p_max_chunks);
+	if (err != OK) {
+		return err;
+	}
+	return _flush_dirty_saved_object_chunks(p_max_chunks);
 }
 
 Error VoxelWorld::close_world_save() {
@@ -1857,6 +1933,11 @@ Error VoxelWorld::close_world_save() {
 	world_save_character_state.clear();
 	dirty_saved_chunks.clear();
 	pending_saved_chunk_blocks.clear();
+	dirty_saved_object_chunks.clear();
+	pending_saved_chunk_objects.clear();
+	world_objects.clear();
+	object_ids_by_chunk.clear();
+	next_world_object_id = 1;
 	return err;
 }
 
@@ -1879,6 +1960,12 @@ Vector3i VoxelWorld::_world_to_local_block(const Vector3 &p_world_pos) const {
 	return Vector3i(lx, ly, lz);
 }
 
+Vector2i VoxelWorld::_block_to_chunk(const Vector3i &p_block_pos) const {
+	int cx = (int)Math::floor((float)p_block_pos.x / (float)VoxelChunk::SIZE_X);
+	int cz = (int)Math::floor((float)p_block_pos.z / (float)VoxelChunk::SIZE_Z);
+	return Vector2i(cx, cz);
+}
+
 Vector3i VoxelWorld::world_to_block_pos(const Vector3 &p_world_pos) const {
 	int bx = (int)Math::floor(p_world_pos.x / block_size);
 	int by = (int)Math::floor(p_world_pos.y / block_size);
@@ -1890,6 +1977,483 @@ Vector3 VoxelWorld::block_to_world_pos(const Vector3i &p_block_pos) const {
 	return Vector3(p_block_pos.x * block_size + block_size * 0.5f,
 			p_block_pos.y * block_size + block_size * 0.5f,
 			p_block_pos.z * block_size + block_size * 0.5f);
+}
+
+Dictionary VoxelWorld::_world_object_to_dictionary(const WorldObjectEntry &p_object) const {
+	Dictionary d;
+	d["id"] = p_object.id;
+	d["type"] = String(p_object.type);
+	d["block_pos"] = p_object.block_pos;
+	d["rotation_y"] = p_object.rotation_y;
+	d["state"] = p_object.state;
+	d["blocking"] = p_object.blocking;
+	return d;
+}
+
+VoxelWorld::WorldObjectEntry VoxelWorld::_world_object_from_dictionary(const Dictionary &p_dict) const {
+	WorldObjectEntry object;
+	object.id = (int64_t)p_dict.get("id", (int64_t)0);
+	object.type = StringName(String(p_dict.get("type", String())));
+	object.block_pos = p_dict.get("block_pos", Vector3i());
+	object.rotation_y = (float)p_dict.get("rotation_y", 0.0f);
+	object.state = p_dict.get("state", Dictionary());
+	object.blocking = (bool)p_dict.get("blocking", false);
+	return object;
+}
+
+void VoxelWorld::_index_world_object(const WorldObjectEntry &p_object) {
+	Vector2i key = _block_to_chunk(p_object.block_pos);
+	Vector<int64_t> *ids = object_ids_by_chunk.getptr(key);
+	if (ids == nullptr) {
+		object_ids_by_chunk[key] = Vector<int64_t>();
+		ids = object_ids_by_chunk.getptr(key);
+	}
+	for (int i = 0; i < ids->size(); i++) {
+		if ((*ids)[i] == p_object.id) {
+			return;
+		}
+	}
+	ids->push_back(p_object.id);
+}
+
+void VoxelWorld::_unindex_world_object(const WorldObjectEntry &p_object) {
+	Vector2i key = _block_to_chunk(p_object.block_pos);
+	Vector<int64_t> *ids = object_ids_by_chunk.getptr(key);
+	if (ids == nullptr) {
+		return;
+	}
+	for (int i = 0; i < ids->size(); i++) {
+		if ((*ids)[i] == p_object.id) {
+			ids->remove_at(i);
+			break;
+		}
+	}
+	if (ids->is_empty()) {
+		object_ids_by_chunk.erase(key);
+	}
+}
+
+int64_t VoxelWorld::_add_world_object_internal(const WorldObjectEntry &p_object, bool p_mark_dirty, bool p_emit_signal) {
+	ERR_FAIL_COND_V_MSG(p_object.id == 0, 0, "World object id cannot be 0.");
+	if (world_objects.has(p_object.id)) {
+		return p_object.id;
+	}
+	world_objects[p_object.id] = p_object;
+	_index_world_object(p_object);
+	if (p_object.id >= next_world_object_id) {
+		next_world_object_id = p_object.id + 1;
+	}
+	if (p_mark_dirty && world_save_loaded) {
+		dirty_saved_object_chunks.insert(_block_to_chunk(p_object.block_pos));
+	}
+	if (p_emit_signal) {
+		emit_signal("world_object_added", p_object.id, _world_object_to_dictionary(p_object));
+	}
+	return p_object.id;
+}
+
+bool VoxelWorld::_remove_world_object_internal(int64_t p_id, bool p_mark_dirty, bool p_emit_signal) {
+	WorldObjectEntry *object = world_objects.getptr(p_id);
+	if (object == nullptr) {
+		return false;
+	}
+	Vector2i key = _block_to_chunk(object->block_pos);
+	WorldObjectEntry removed = *object;
+	_unindex_world_object(removed);
+	world_objects.erase(p_id);
+	if (p_mark_dirty && world_save_loaded) {
+		dirty_saved_object_chunks.insert(key);
+	}
+	if (p_emit_signal) {
+		emit_signal("world_object_removed", p_id);
+	}
+	return true;
+}
+
+Array VoxelWorld::_get_world_objects_array_for_chunk(const Vector2i &p_key) const {
+	Array objects;
+	const Vector<int64_t> *ids = object_ids_by_chunk.getptr(p_key);
+	if (ids == nullptr) {
+		return objects;
+	}
+	for (int i = 0; i < ids->size(); i++) {
+		const WorldObjectEntry *object = world_objects.getptr((*ids)[i]);
+		if (object != nullptr) {
+			objects.push_back(_world_object_to_dictionary(*object));
+		}
+	}
+	return objects;
+}
+
+Error VoxelWorld::_save_chunk_objects(const Vector2i &p_key, const Array &p_objects) {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return OK;
+	}
+	const String object_path = VoxelWorldSave::get_chunk_objects_file_path(world_save_dir, p_key);
+	return VoxelWorldSave::save_chunk_objects_file(object_path, p_objects);
+}
+
+Error VoxelWorld::_save_chunk_objects_if_dirty(const Vector2i &p_key, bool p_force) {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return OK;
+	}
+	if (!p_force && !dirty_saved_object_chunks.has(p_key)) {
+		return OK;
+	}
+	Error err = _save_chunk_objects(p_key, _get_world_objects_array_for_chunk(p_key));
+	if (err == OK) {
+		dirty_saved_object_chunks.erase(p_key);
+	}
+	return err;
+}
+
+void VoxelWorld::_queue_object_save_snapshot(const Vector2i &p_key) {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return;
+	}
+	if (!dirty_saved_object_chunks.has(p_key)) {
+		return;
+	}
+	pending_saved_chunk_objects[p_key] = _get_world_objects_array_for_chunk(p_key);
+	dirty_saved_object_chunks.erase(p_key);
+}
+
+Error VoxelWorld::_flush_dirty_saved_object_chunks(int p_max_chunks) {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return OK;
+	}
+	if (p_max_chunks == 0) {
+		return OK;
+	}
+
+	Error result = OK;
+	int flushed_count = 0;
+	const bool unlimited = p_max_chunks < 0;
+	auto can_flush_more = [&]() -> bool {
+		return unlimited || flushed_count < p_max_chunks;
+	};
+
+	Vector<Vector2i> pending_keys;
+	for (const KeyValue<Vector2i, Array> &E : pending_saved_chunk_objects) {
+		pending_keys.push_back(E.key);
+	}
+	for (int i = 0; i < pending_keys.size() && can_flush_more(); i++) {
+		const Vector2i key = pending_keys[i];
+		Array *objects = pending_saved_chunk_objects.getptr(key);
+		if (objects == nullptr) {
+			continue;
+		}
+		Error err = _save_chunk_objects(key, *objects);
+		if (err == OK) {
+			pending_saved_chunk_objects.erase(key);
+		} else if (result == OK) {
+			result = err;
+		}
+		flushed_count++;
+	}
+	if (!can_flush_more()) {
+		return result;
+	}
+
+	Vector<Vector2i> dirty_keys;
+	for (const Vector2i &key : dirty_saved_object_chunks) {
+		dirty_keys.push_back(key);
+	}
+	for (int i = 0; i < dirty_keys.size() && can_flush_more(); i++) {
+		Error err = _save_chunk_objects_if_dirty(dirty_keys[i], true);
+		if (err != OK && result == OK) {
+			result = err;
+		}
+		flushed_count++;
+	}
+	return result;
+}
+
+bool VoxelWorld::_load_world_objects_for_chunk(const Vector2i &p_key) {
+	if (!world_save_loaded || world_save_dir.is_empty()) {
+		return false;
+	}
+	const String object_path = VoxelWorldSave::get_chunk_objects_file_path(world_save_dir, p_key);
+	if (!FileAccess::exists(object_path)) {
+		return false;
+	}
+	Array loaded_objects;
+	if (VoxelWorldSave::load_chunk_objects_file(object_path, &loaded_objects) != OK) {
+		return false;
+	}
+	for (int i = 0; i < loaded_objects.size(); i++) {
+		if (loaded_objects[i].get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		WorldObjectEntry object = _world_object_from_dictionary(loaded_objects[i]);
+		if (object.id == 0) {
+			object.id = next_world_object_id++;
+		}
+		_add_world_object_internal(object, false, true);
+	}
+	return true;
+}
+
+void VoxelWorld::_remove_world_objects_in_chunk(const Vector2i &p_key, bool p_emit_signal) {
+	Vector<int64_t> ids;
+	const Vector<int64_t> *indexed = object_ids_by_chunk.getptr(p_key);
+	if (indexed != nullptr) {
+		ids = *indexed;
+	}
+	for (int i = 0; i < ids.size(); i++) {
+		_remove_world_object_internal(ids[i], false, p_emit_signal);
+	}
+}
+
+int64_t VoxelWorld::add_world_object(const StringName &p_type, const Vector3i &p_block_pos, float p_rotation_y, const Dictionary &p_state, bool p_blocking) {
+	WorldObjectEntry object;
+	object.id = next_world_object_id++;
+	object.type = p_type;
+	object.block_pos = p_block_pos;
+	object.rotation_y = p_rotation_y;
+	object.state = p_state;
+	object.blocking = p_blocking;
+	return _add_world_object_internal(object, true, true);
+}
+
+bool VoxelWorld::remove_world_object(int64_t p_id) {
+	return _remove_world_object_internal(p_id, true, true);
+}
+
+Dictionary VoxelWorld::get_world_object(int64_t p_id) const {
+	const WorldObjectEntry *object = world_objects.getptr(p_id);
+	if (object == nullptr) {
+		return Dictionary();
+	}
+	return _world_object_to_dictionary(*object);
+}
+
+bool VoxelWorld::set_world_object_state(int64_t p_id, const Dictionary &p_state) {
+	WorldObjectEntry *object = world_objects.getptr(p_id);
+	if (object == nullptr) {
+		return false;
+	}
+	object->state = p_state;
+	if (world_save_loaded) {
+		dirty_saved_object_chunks.insert(_block_to_chunk(object->block_pos));
+	}
+	emit_signal("world_object_state_changed", p_id, p_state);
+	return true;
+}
+
+bool VoxelWorld::set_world_object_blocking(int64_t p_id, bool p_blocking) {
+	WorldObjectEntry *object = world_objects.getptr(p_id);
+	if (object == nullptr) {
+		return false;
+	}
+	if (object->blocking == p_blocking) {
+		return true;
+	}
+	object->blocking = p_blocking;
+	if (world_save_loaded) {
+		dirty_saved_object_chunks.insert(_block_to_chunk(object->block_pos));
+	}
+	return true;
+}
+
+Array VoxelWorld::get_world_objects_in_chunk(const Vector2i &p_chunk_pos) const {
+	return _get_world_objects_array_for_chunk(p_chunk_pos);
+}
+
+static _FORCE_INLINE_ uint32_t _voxel_world_mix_u32(uint32_t v) {
+	v ^= v >> 16;
+	v *= 0x7feb352dU;
+	v ^= v >> 15;
+	v *= 0x846ca68bU;
+	v ^= v >> 16;
+	return v;
+}
+
+static bool _packed_string_array_has(const PackedStringArray &p_array, const String &p_value) {
+	for (int i = 0; i < p_array.size(); i++) {
+		if (p_array[i] == p_value) {
+			return true;
+		}
+	}
+	return false;
+}
+
+uint32_t VoxelWorld::_hash_structure_anchor(int p_structure_id, const Vector2i &p_anchor_key, uint32_t p_salt) const {
+	uint32_t h = (uint32_t)seed;
+	h ^= (uint32_t)p_structure_id * 0x9e3779b9U;
+	h ^= (uint32_t)p_anchor_key.x * 0x85ebca6bU;
+	h ^= (uint32_t)p_anchor_key.y * 0xc2b2ae35U;
+	h ^= p_salt * 0x27d4eb2dU;
+	return _voxel_world_mix_u32(h);
+}
+
+bool VoxelWorld::_structure_should_place(int p_structure_id, const Vector2i &p_anchor_key) const {
+	if (structure_registry.is_null() || !structure_registry->has_structure(p_structure_id)) {
+		return false;
+	}
+	const VoxelStructureRegistry::StructureEntry &entry = structure_registry->get_structures()[p_structure_id];
+	if (entry.rarity <= 0) {
+		return false;
+	}
+	if (!entry.biome_tags.is_empty() && generator != nullptr) {
+		const int bx = p_anchor_key.x * VoxelChunk::SIZE_X + (VoxelChunk::SIZE_X / 2);
+		const int bz = p_anchor_key.y * VoxelChunk::SIZE_Z + (VoxelChunk::SIZE_Z / 2);
+		const int biome_id = generator->get_biome_index_at(bx, bz);
+		String biome_name;
+		if (biome_registry.is_valid() && biome_id >= 0 && biome_id < biome_registry->get_biome_count()) {
+			biome_name = biome_registry->get_biome_name(biome_id);
+		}
+		if (biome_name.is_empty() || !_packed_string_array_has(entry.biome_tags, biome_name)) {
+			return false;
+		}
+	}
+	return (_hash_structure_anchor(p_structure_id, p_anchor_key) % (uint32_t)entry.rarity) == 0;
+}
+
+int VoxelWorld::_select_structure_rotation(const VoxelStructureRegistry::StructureEntry &p_entry, int p_structure_id, const Vector2i &p_anchor_key) const {
+	const PackedInt32Array &rotations = p_entry.allowed_rotations;
+	if (rotations.is_empty()) {
+		return 0;
+	}
+	const uint32_t h = _hash_structure_anchor(p_structure_id, p_anchor_key, 1);
+	int rotation = rotations[h % (uint32_t)rotations.size()];
+	rotation %= 360;
+	if (rotation < 0) {
+		rotation += 360;
+	}
+	if (rotation == 90 || rotation == 180 || rotation == 270) {
+		return rotation;
+	}
+	return 0;
+}
+
+Vector3i VoxelWorld::_rotate_structure_local(const Vector3i &p_local, const Vector3i &p_size, int p_rotation) const {
+	switch (p_rotation) {
+		case 90:
+			return Vector3i(p_size.z - 1 - p_local.z, p_local.y, p_local.x);
+		case 180:
+			return Vector3i(p_size.x - 1 - p_local.x, p_local.y, p_size.z - 1 - p_local.z);
+		case 270:
+			return Vector3i(p_local.z, p_local.y, p_size.x - 1 - p_local.x);
+		default:
+			return p_local;
+	}
+}
+
+bool VoxelWorld::_apply_structures_to_chunk(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_blocks_from_save) {
+	if (p_blocks_from_save || p_chunk == nullptr || structure_registry.is_null() || structure_registry->get_structure_count() == 0 || generator == nullptr) {
+		return false;
+	}
+
+	bool modified = false;
+	const Vector<VoxelStructureRegistry::StructureEntry> &entries = structure_registry->get_structures();
+	for (int si = 0; si < entries.size(); si++) {
+		const VoxelStructureRegistry::StructureEntry &entry = entries[si];
+		if (entry.voxel_data.is_null() || entry.rarity <= 0) {
+			continue;
+		}
+		const Vector3i size = entry.voxel_data->get_size();
+		if (size.x <= 0 || size.y <= 0 || size.z <= 0) {
+			continue;
+		}
+		const int candidate_radius = MAX(size.x, size.z) / VoxelChunk::SIZE_X + 2;
+		for (int ax = p_key.x - candidate_radius; ax <= p_key.x + candidate_radius; ax++) {
+			for (int az = p_key.y - candidate_radius; az <= p_key.y + candidate_radius; az++) {
+				const Vector2i anchor_key(ax, az);
+				if (!_structure_should_place(si, anchor_key)) {
+					continue;
+				}
+
+				const uint32_t h = _hash_structure_anchor(si, anchor_key, 2);
+				const int local_x = (int)(h % VoxelChunk::SIZE_X);
+				const int local_z = (int)((h >> 8) % VoxelChunk::SIZE_Z);
+				const int anchor_x = anchor_key.x * VoxelChunk::SIZE_X + local_x;
+				const int anchor_z = anchor_key.y * VoxelChunk::SIZE_Z + local_z;
+				const int anchor_y = CLAMP(generator->get_surface_y_at(anchor_x, anchor_z) + 1, 1, VoxelChunk::SIZE_Y - 1);
+				const int rotation = _select_structure_rotation(entry, si, anchor_key);
+				const Vector3i rotated_anchor = _rotate_structure_local(entry.anchor, size, rotation);
+				const Vector3i world_origin(anchor_x - rotated_anchor.x, anchor_y - rotated_anchor.y, anchor_z - rotated_anchor.z);
+
+				const Vector<uint16_t> &template_blocks = entry.voxel_data->get_blocks_array();
+				for (int y = 0; y < size.y; y++) {
+					for (int z = 0; z < size.z; z++) {
+						for (int x = 0; x < size.x; x++) {
+							const int template_index = entry.voxel_data->index_of(x, y, z);
+							const uint16_t block_id = template_blocks[template_index];
+							if (block_id == VOXEL_BLOCK_AIR) {
+								continue;
+							}
+							const Vector3i rotated = _rotate_structure_local(Vector3i(x, y, z), size, rotation);
+							const Vector3i world_pos = world_origin + rotated;
+							if (_block_to_chunk(world_pos) != p_key || world_pos.y < 0 || world_pos.y >= VoxelChunk::SIZE_Y) {
+								continue;
+							}
+							const int lx = world_pos.x - p_key.x * VoxelChunk::SIZE_X;
+							const int lz = world_pos.z - p_key.y * VoxelChunk::SIZE_Z;
+							if (lx < 0 || lx >= VoxelChunk::SIZE_X || lz < 0 || lz >= VoxelChunk::SIZE_Z) {
+								continue;
+							}
+							p_chunk->set_block(lx, world_pos.y, lz, block_id);
+							modified = true;
+						}
+					}
+				}
+			}
+		}
+	}
+	return modified;
+}
+
+void VoxelWorld::_generate_structure_objects_for_chunk(const Vector2i &p_key) {
+	if (structure_registry.is_null() || structure_registry->get_structure_count() == 0 || generator == nullptr) {
+		return;
+	}
+	const Vector<VoxelStructureRegistry::StructureEntry> &entries = structure_registry->get_structures();
+	for (int si = 0; si < entries.size(); si++) {
+		const VoxelStructureRegistry::StructureEntry &entry = entries[si];
+		if (entry.world_object_type == StringName() || entry.rarity <= 0) {
+			continue;
+		}
+		const Vector3i size = entry.voxel_data.is_valid() ? entry.voxel_data->get_size() : entry.size;
+		const int candidate_radius = MAX(MAX(size.x, size.z), 1) / VoxelChunk::SIZE_X + 2;
+		for (int ax = p_key.x - candidate_radius; ax <= p_key.x + candidate_radius; ax++) {
+			for (int az = p_key.y - candidate_radius; az <= p_key.y + candidate_radius; az++) {
+				const Vector2i anchor_key(ax, az);
+				if (!_structure_should_place(si, anchor_key)) {
+					continue;
+				}
+				const uint32_t h = _hash_structure_anchor(si, anchor_key, 2);
+				const int local_x = (int)(h % VoxelChunk::SIZE_X);
+				const int local_z = (int)((h >> 8) % VoxelChunk::SIZE_Z);
+				const int anchor_x = anchor_key.x * VoxelChunk::SIZE_X + local_x;
+				const int anchor_z = anchor_key.y * VoxelChunk::SIZE_Z + local_z;
+				const int anchor_y = CLAMP(generator->get_surface_y_at(anchor_x, anchor_z) + 1, 1, VoxelChunk::SIZE_Y - 1);
+				const Vector3i object_pos(anchor_x, anchor_y, anchor_z);
+				if (_block_to_chunk(object_pos) != p_key) {
+					continue;
+				}
+
+				const uint32_t id_hi = _hash_structure_anchor(si, anchor_key, 100);
+				const uint32_t id_lo = _hash_structure_anchor(si, anchor_key, 101);
+				int64_t object_id = -((int64_t)((((uint64_t)id_hi) << 32) | id_lo) & 0x7FFFFFFFFFFFFFFFLL);
+				if (object_id == 0) {
+					object_id = -1;
+				}
+				Dictionary state = entry.world_object_state;
+				state["structure_name"] = entry.name;
+				state["generated"] = true;
+
+				WorldObjectEntry object;
+				object.id = object_id;
+				object.type = entry.world_object_type;
+				object.block_pos = object_pos;
+				object.rotation_y = (float)_select_structure_rotation(entry, si, anchor_key);
+				object.state = state;
+				object.blocking = entry.world_object_blocking;
+				_add_world_object_internal(object, false, true);
+			}
+		}
+	}
 }
 
 // --- Block interaction API ---
@@ -2167,6 +2731,53 @@ Dictionary VoxelWorld::move_body(const AABB &p_body, const Vector3 &p_velocity, 
 					}
 
 					// Recompute swept AABB after correction.
+					swept = AABB(new_pos, size);
+				}
+			}
+		}
+
+		const int min_cx = (int)Math::floor((float)min_bx / (float)VoxelChunk::SIZE_X);
+		const int max_cx = (int)Math::floor((float)max_bx / (float)VoxelChunk::SIZE_X);
+		const int min_cz = (int)Math::floor((float)min_bz / (float)VoxelChunk::SIZE_Z);
+		const int max_cz = (int)Math::floor((float)max_bz / (float)VoxelChunk::SIZE_Z);
+		for (int cz = min_cz; cz <= max_cz; cz++) {
+			for (int cx = min_cx; cx <= max_cx; cx++) {
+				const Vector<int64_t> *ids = object_ids_by_chunk.getptr(Vector2i(cx, cz));
+				if (ids == nullptr) {
+					continue;
+				}
+				for (int i = 0; i < ids->size(); i++) {
+					const WorldObjectEntry *object = world_objects.getptr((*ids)[i]);
+					if (object == nullptr || !object->blocking) {
+						continue;
+					}
+					AABB object_aabb(Vector3(object->block_pos.x * bs, object->block_pos.y * bs, object->block_pos.z * bs), Vector3(bs, bs, bs));
+					if (!swept.intersects(object_aabb)) {
+						continue;
+					}
+					if (axis == 0) {
+						if (axis_move > 0) {
+							new_pos.x = object_aabb.position.x - size.x;
+						} else {
+							new_pos.x = object_aabb.position.x + bs;
+						}
+						vel.x = 0;
+					} else if (axis == 1) {
+						if (axis_move < 0) {
+							new_pos.y = object_aabb.position.y + bs;
+							on_ground = true;
+						} else {
+							new_pos.y = object_aabb.position.y - size.y;
+						}
+						vel.y = 0;
+					} else {
+						if (axis_move > 0) {
+							new_pos.z = object_aabb.position.z - size.z;
+						} else {
+							new_pos.z = object_aabb.position.z + bs;
+						}
+						vel.z = 0;
+					}
 					swept = AABB(new_pos, size);
 				}
 			}

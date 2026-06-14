@@ -140,11 +140,12 @@ public:
 
 	// Set biome data from a VoxelBiomeRegistry. Call before generating chunks.
 	void set_biome_data(const Vector<RuntimeBiomeData> &p_biomes);
-	// Populate default 4 biomes (fallback if no registry provided).
+	// Populate built-in biomes (fallback if no registry provided).
 	void setup_default_biomes();
 
 	// Returns the index of the dominant biome at the given world block coordinates.
 	int get_biome_index_at(int p_world_x, int p_world_z) const;
+	int get_surface_y_at(int p_world_x, int p_world_z) const;
 
 	Vector<uint16_t> generate_chunk_data(int p_chunk_x, int p_chunk_z) const;
 	static _FORCE_INLINE_ int block_index(int p_x, int p_y, int p_z) {

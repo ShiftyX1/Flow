@@ -2,6 +2,7 @@
 
 #include "voxel_terrain_generator.h"
 
+#include "core/io/config_file.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 
@@ -13,8 +14,16 @@ String VoxelWorldSave::get_chunks_dir(const String &p_save_dir) {
 	return p_save_dir.path_join("chunks");
 }
 
+String VoxelWorldSave::get_objects_dir(const String &p_save_dir) {
+	return p_save_dir.path_join("objects");
+}
+
 String VoxelWorldSave::get_chunk_file_path(const String &p_save_dir, const Vector2i &p_chunk_key) {
 	return get_chunks_dir(p_save_dir).path_join(itos(p_chunk_key.x) + "_" + itos(p_chunk_key.y) + ".voxchunk");
+}
+
+String VoxelWorldSave::get_chunk_objects_file_path(const String &p_save_dir, const Vector2i &p_chunk_key) {
+	return get_objects_dir(p_save_dir).path_join(itos(p_chunk_key.x) + "_" + itos(p_chunk_key.y) + ".cfg");
 }
 
 Error VoxelWorldSave::ensure_save_dirs(const String &p_save_dir) {
@@ -22,7 +31,11 @@ Error VoxelWorldSave::ensure_save_dirs(const String &p_save_dir) {
 	if (err != OK) {
 		return err;
 	}
-	return DirAccess::make_dir_recursive_absolute(get_chunks_dir(p_save_dir));
+	err = DirAccess::make_dir_recursive_absolute(get_chunks_dir(p_save_dir));
+	if (err != OK) {
+		return err;
+	}
+	return DirAccess::make_dir_recursive_absolute(get_objects_dir(p_save_dir));
 }
 
 Error VoxelWorldSave::save_chunk_file(const String &p_path, const Vector<uint16_t> &p_blocks) {
@@ -54,6 +67,47 @@ Error VoxelWorldSave::save_chunk_file(const String &p_path, const Vector<uint16_
 		f->store_16((uint16_t)(i - run_start));
 	}
 
+	return OK;
+}
+
+Error VoxelWorldSave::save_chunk_objects_file(const String &p_path, const Array &p_objects) {
+	Error err = DirAccess::make_dir_recursive_absolute(p_path.get_base_dir());
+	ERR_FAIL_COND_V(err != OK, err);
+
+	Ref<ConfigFile> config;
+	config.instantiate();
+	config->set_value("objects", "count", p_objects.size());
+	for (int i = 0; i < p_objects.size(); i++) {
+		config->set_value("objects", "object_" + itos(i), p_objects[i]);
+	}
+
+	const String tmp_path = p_path + ".tmp";
+	err = config->save(tmp_path);
+	ERR_FAIL_COND_V(err != OK, err);
+	if (FileAccess::exists(p_path)) {
+		err = DirAccess::remove_absolute(p_path);
+		ERR_FAIL_COND_V(err != OK, err);
+	}
+	return DirAccess::rename_absolute(tmp_path, p_path);
+}
+
+Error VoxelWorldSave::load_chunk_objects_file(const String &p_path, Array *r_objects) {
+	ERR_FAIL_NULL_V(r_objects, ERR_INVALID_PARAMETER);
+
+	Error err;
+	Ref<ConfigFile> config;
+	config.instantiate();
+	err = config->load(p_path);
+	ERR_FAIL_COND_V_MSG(err != OK, err, vformat("VoxelWorldSave: failed to load chunk objects: %s", p_path));
+
+	const int count = (int)config->get_value("objects", "count", 0);
+	r_objects->clear();
+	for (int i = 0; i < count; i++) {
+		Variant object_value = config->get_value("objects", "object_" + itos(i), Dictionary());
+		if (object_value.get_type() == Variant::DICTIONARY) {
+			r_objects->push_back(object_value);
+		}
+	}
 	return OK;
 }
 

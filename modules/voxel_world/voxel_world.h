@@ -5,12 +5,15 @@
 #include "voxel_chunk.h"
 #include "voxel_light_map.h"
 #include "voxel_mesher.h"
+#include "voxel_structure_registry.h"
 #include "voxel_terrain_generator.h"
 #include "voxel_world_save.h"
 
 #include "core/os/mutex.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/variant/array.h"
+#include "core/variant/dictionary.h"
 #include "scene/3d/light_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/3d/world_environment.h"
@@ -68,11 +71,27 @@ private:
 
 	Ref<VoxelBlockRegistry> block_registry;
 	Ref<VoxelBiomeRegistry> biome_registry;
+	Ref<VoxelStructureRegistry> structure_registry;
 
 	VoxelTerrainGenerator *generator = nullptr;
 	HashMap<Vector2i, VoxelChunk *> loaded_chunks;
 	HashSet<Vector2i> dirty_saved_chunks;
 	HashMap<Vector2i, Vector<uint16_t>> pending_saved_chunk_blocks;
+
+	struct WorldObjectEntry {
+		int64_t id = 0;
+		StringName type;
+		Vector3i block_pos;
+		float rotation_y = 0.0f;
+		Dictionary state;
+		bool blocking = false;
+	};
+
+	HashMap<int64_t, WorldObjectEntry> world_objects;
+	HashMap<Vector2i, Vector<int64_t>> object_ids_by_chunk;
+	HashSet<Vector2i> dirty_saved_object_chunks;
+	HashMap<Vector2i, Array> pending_saved_chunk_objects;
+	int64_t next_world_object_id = 1;
 	Ref<StandardMaterial3D> material;
 	Ref<Shader> voxel_shader;
 	Ref<ShaderMaterial> voxel_untextured_shader_material;
@@ -99,6 +118,7 @@ private:
 		Vector<uint8_t> light_data;
 		Vector<VoxelMesher::MeshSurface> surfaces;
 		bool is_remesh = false; // true = update existing chunk, false = create new chunk
+		bool blocks_from_save = false;
 	};
 
 	// Chunks currently being generated on background threads.
@@ -170,6 +190,30 @@ private:
 	// Helpers for coordinate conversion.
 	Vector2i _world_to_chunk(const Vector3 &p_world_pos) const;
 	Vector3i _world_to_local_block(const Vector3 &p_world_pos) const;
+	Vector2i _block_to_chunk(const Vector3i &p_block_pos) const;
+
+	// Sparse world object helpers.
+	Dictionary _world_object_to_dictionary(const WorldObjectEntry &p_object) const;
+	WorldObjectEntry _world_object_from_dictionary(const Dictionary &p_dict) const;
+	int64_t _add_world_object_internal(const WorldObjectEntry &p_object, bool p_mark_dirty, bool p_emit_signal);
+	bool _remove_world_object_internal(int64_t p_id, bool p_mark_dirty, bool p_emit_signal);
+	void _index_world_object(const WorldObjectEntry &p_object);
+	void _unindex_world_object(const WorldObjectEntry &p_object);
+	Array _get_world_objects_array_for_chunk(const Vector2i &p_key) const;
+	Error _save_chunk_objects(const Vector2i &p_key, const Array &p_objects);
+	Error _save_chunk_objects_if_dirty(const Vector2i &p_key, bool p_force = false);
+	void _queue_object_save_snapshot(const Vector2i &p_key);
+	Error _flush_dirty_saved_object_chunks(int p_max_chunks = -1);
+	bool _load_world_objects_for_chunk(const Vector2i &p_key);
+	void _remove_world_objects_in_chunk(const Vector2i &p_key, bool p_emit_signal = false);
+
+	// Deterministic structure placement.
+	uint32_t _hash_structure_anchor(int p_structure_id, const Vector2i &p_anchor_key, uint32_t p_salt = 0) const;
+	bool _structure_should_place(int p_structure_id, const Vector2i &p_anchor_key) const;
+	int _select_structure_rotation(const VoxelStructureRegistry::StructureEntry &p_entry, int p_structure_id, const Vector2i &p_anchor_key) const;
+	Vector3i _rotate_structure_local(const Vector3i &p_local, const Vector3i &p_size, int p_rotation) const;
+	bool _apply_structures_to_chunk(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_blocks_from_save);
+	void _generate_structure_objects_for_chunk(const Vector2i &p_key);
 
 	// Day/night cycle helpers.
 	void _resolve_environment_nodes();
@@ -218,6 +262,9 @@ public:
 
 	void set_biome_registry(const Ref<VoxelBiomeRegistry> &p_registry);
 	Ref<VoxelBiomeRegistry> get_biome_registry() const;
+
+	void set_structure_registry(const Ref<VoxelStructureRegistry> &p_registry);
+	Ref<VoxelStructureRegistry> get_structure_registry() const;
 
 	void set_verbose_logging(bool p_enabled) { verbose_logging = p_enabled; }
 	bool get_verbose_logging() const { return verbose_logging; }
@@ -280,6 +327,13 @@ public:
 	// Get biome name at a world position (uses registry name if set, fallback otherwise).
 	String get_biome_name_at(const Vector3 &p_world_pos) const;
 
+	int64_t add_world_object(const StringName &p_type, const Vector3i &p_block_pos, float p_rotation_y = 0.0f, const Dictionary &p_state = Dictionary(), bool p_blocking = false);
+	bool remove_world_object(int64_t p_id);
+	Dictionary get_world_object(int64_t p_id) const;
+	bool set_world_object_state(int64_t p_id, const Dictionary &p_state);
+	bool set_world_object_blocking(int64_t p_id, bool p_blocking);
+	Array get_world_objects_in_chunk(const Vector2i &p_chunk_pos) const;
+
 	// Convert world position to block grid position.
 	Vector3i world_to_block_pos(const Vector3 &p_world_pos) const;
 	Vector3 block_to_world_pos(const Vector3i &p_block_pos) const;
@@ -302,7 +356,7 @@ public:
 	Error load_world_save(const String &p_save_dir);
 	Error save_world_state(const Dictionary &p_player_state = Dictionary(), const Dictionary &p_character_state = Dictionary(), int p_max_dirty_chunks = -1);
 	Error flush_world_save_dirty_chunks(int p_max_chunks = 1);
-	int get_world_save_dirty_chunk_count() const { return (int)dirty_saved_chunks.size() + (int)pending_saved_chunk_blocks.size(); }
+	int get_world_save_dirty_chunk_count() const { return (int)dirty_saved_chunks.size() + (int)pending_saved_chunk_blocks.size() + (int)dirty_saved_object_chunks.size() + (int)pending_saved_chunk_objects.size(); }
 	Error close_world_save();
 	bool is_world_save_loaded() const { return world_save_loaded; }
 	Dictionary get_world_save_metadata() const { return world_save_metadata; }

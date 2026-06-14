@@ -5,6 +5,7 @@
 #pragma once
 
 #include "../voxel_terrain_generator.h"
+#include "../voxel_structure_registry.h"
 #include "../voxel_world.h"
 #include "../voxel_world_save.h"
 
@@ -43,6 +44,113 @@ TEST_CASE("[VoxelWorld] Chunk save path and round-trip") {
 	blocks.resize(total - 1);
 	CHECK(VoxelWorldSave::save_chunk_file(chunk_path, blocks) == ERR_INVALID_DATA);
 	DirAccess::remove_absolute(chunk_path);
+}
+
+TEST_CASE("[VoxelWorld] Block registry stores world-foundation properties") {
+	Ref<VoxelBlockRegistry> registry;
+	registry.instantiate();
+
+	PackedStringArray tags;
+	tags.push_back("ruin");
+	tags.push_back("metal");
+
+	Dictionary props;
+	props["shape"] = "pane";
+	props["tags"] = tags;
+	props["resource_id"] = "scrap_metal";
+	props["hazard_id"] = "electric";
+	props["hazard_strength"] = 2.5f;
+	props["is_fluid"] = false;
+	props["replaceable"] = true;
+
+	const int id = registry->register_block("rusted_panel", props);
+	CHECK(registry->get_block_shape(id) == VoxelBlockRegistry::BLOCK_SHAPE_PANE);
+	CHECK(registry->block_has_tag(id, "ruin"));
+	CHECK(registry->get_block_resource_id(id) == StringName("scrap_metal"));
+	CHECK(registry->get_block_hazard_id(id) == StringName("electric"));
+	CHECK(Math::is_equal_approx(registry->get_block_hazard_strength(id), 2.5f));
+	CHECK(!registry->get_block_is_fluid(id));
+	CHECK(registry->get_block_replaceable(id));
+}
+
+TEST_CASE("[VoxelWorld] Default content slice exposes restored forest beacon data") {
+	Ref<VoxelBlockRegistry> blocks;
+	blocks.instantiate();
+	blocks->setup_defaults();
+
+	CHECK(blocks->get_block_shape(VOXEL_BLOCK_BIOLUMEN_PLANT) == VoxelBlockRegistry::BLOCK_SHAPE_CROSS_PLANT);
+	CHECK(blocks->block_has_tag(VOXEL_BLOCK_BIOLUMEN_PLANT, "restored_forest"));
+	CHECK(blocks->get_block_resource_id(VOXEL_BLOCK_BIO_RESIN) == StringName("bio_resin"));
+	CHECK(blocks->block_has_tag(VOXEL_BLOCK_BEACON_CORE, "signal"));
+
+	Ref<VoxelStructureRegistry> structures;
+	structures.instantiate();
+	structures->setup_defaults();
+	REQUIRE(structures->get_structure_count() == 1);
+
+	Dictionary beacon = structures->get_structure(0);
+	CHECK(String(beacon["name"]) == "restored_forest_emergency_beacon");
+	CHECK(String(beacon["world_object_type"]) == "emergency_beacon");
+	CHECK((bool)((Dictionary)beacon["world_object_state"])["active"]);
+
+	Ref<VoxelSceneData> data = beacon["voxel_data"];
+	REQUIRE(data.is_valid());
+	CHECK(data->get_block(3, 1, 3) == VOXEL_BLOCK_BEACON_CORE);
+	CHECK(data->get_block_count_non_air() > 0);
+}
+
+TEST_CASE("[VoxelWorld] Chunk object save round-trip") {
+	const String root = "user://voxel_world_objects_test";
+	const Vector2i chunk_key(3, -1);
+	const String object_path = VoxelWorldSave::get_chunk_objects_file_path(root, chunk_key);
+
+	Dictionary state;
+	state["locked"] = true;
+	state["signal"] = "distress";
+
+	Dictionary object;
+	object["id"] = (int64_t)42;
+	object["type"] = "emergency_beacon";
+	object["block_pos"] = Vector3i(49, 66, -12);
+	object["rotation_y"] = 90.0f;
+	object["state"] = state;
+	object["blocking"] = false;
+
+	Array objects;
+	objects.push_back(object);
+	CHECK(VoxelWorldSave::save_chunk_objects_file(object_path, objects) == OK);
+
+	Array loaded;
+	CHECK(VoxelWorldSave::load_chunk_objects_file(object_path, &loaded) == OK);
+	REQUIRE(loaded.size() == 1);
+	Dictionary loaded_object = loaded[0];
+	CHECK((int64_t)loaded_object["id"] == 42);
+	CHECK(String(loaded_object["type"]) == "emergency_beacon");
+	CHECK((Vector3i)loaded_object["block_pos"] == Vector3i(49, 66, -12));
+	CHECK((bool)((Dictionary)loaded_object["state"])["locked"]);
+
+	DirAccess::remove_absolute(object_path);
+}
+
+TEST_CASE("[VoxelWorld] Blocking world objects participate in body movement") {
+	VoxelWorld world;
+	const int64_t object_id = world.add_world_object(StringName("test_door"), Vector3i(1, 0, 0), 0.0f, Dictionary(), true);
+
+	AABB body(Vector3(0, 0, 0), Vector3(0.9f, 0.9f, 0.9f));
+	Dictionary result = world.move_body(body, Vector3(1, 0, 0), 1.0f);
+	Vector3 position = result["position"];
+	Vector3 velocity = result["velocity"];
+
+	CHECK(Math::is_equal_approx(position.x, 0.1f));
+	CHECK(Math::is_equal_approx(velocity.x, 0.0f));
+
+	CHECK(world.set_world_object_blocking(object_id, false));
+	result = world.move_body(body, Vector3(1, 0, 0), 1.0f);
+	position = result["position"];
+	velocity = result["velocity"];
+
+	CHECK(Math::is_equal_approx(position.x, 1.0f));
+	CHECK(Math::is_equal_approx(velocity.x, 1.0f));
 }
 
 TEST_CASE("[VoxelWorld] Corrupt chunk RLE is rejected") {

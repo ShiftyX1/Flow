@@ -161,6 +161,14 @@ int VoxelTerrainGenerator::get_biome_index_at(int p_world_x, int p_world_z) cons
 	return dominant;
 }
 
+int VoxelTerrainGenerator::get_surface_y_at(int p_world_x, int p_world_z) const {
+	const int count = _get_biome_count();
+	float weights[MAX_BIOMES] = {};
+	_get_biome_weights(p_world_x, p_world_z, weights, count);
+	BiomeParams params = _get_blended_params(weights, count);
+	return _find_surface_y(p_world_x, p_world_z, params);
+}
+
 // ===========================================================================
 // Biome data access helpers
 // ===========================================================================
@@ -215,6 +223,43 @@ void VoxelTerrainGenerator::setup_default_biomes() {
 		tree.density = 400;
 		tree.canopy_shape = VoxelBiomeRegistry::CANOPY_SPHERE;
 		bd.params.features.push_back(tree);
+
+		runtime_biomes.push_back(bd);
+	}
+
+	// Restored forest fallback biome.
+	{
+		RuntimeBiomeData bd;
+		bd.params.height_base = 1.5f;
+		bd.params.height_scale = 17.0f;
+		bd.params.detail_scale = 3.4f;
+		bd.params.density_3d_weight = 0.55f;
+		bd.params.surface_block = VOXEL_BLOCK_GRASS;
+		bd.params.subsurface_block = VOXEL_BLOCK_DIRT;
+		bd.params.shore_block = VOXEL_BLOCK_SAND;
+		bd.params.snow_block = VOXEL_BLOCK_SNOW;
+		bd.params.snow_line = 170;
+		bd.center = Vector2(0.20f, 0.75f);
+
+		VoxelBiomeRegistry::FeatureConfig tree;
+		tree.type = VoxelBiomeRegistry::FeatureConfig::FEATURE_TREE;
+		tree.trunk_block = VOXEL_BLOCK_WOOD;
+		tree.canopy_block = VOXEL_BLOCK_LEAVES;
+		tree.density = 220;
+		tree.min_trunk = 5;
+		tree.max_trunk = 8;
+		tree.canopy_radius = 3;
+		tree.canopy_shape = VoxelBiomeRegistry::CANOPY_SPHERE;
+		bd.params.features.push_back(tree);
+
+		VoxelBiomeRegistry::FeatureConfig plant;
+		plant.type = VoxelBiomeRegistry::FeatureConfig::FEATURE_SCATTER;
+		plant.block = VOXEL_BLOCK_BIOLUMEN_PLANT;
+		plant.density = 45;
+		plant.min_y = 54;
+		plant.max_y = 170;
+		plant.surface_only = true;
+		bd.params.features.push_back(plant);
 
 		runtime_biomes.push_back(bd);
 	}

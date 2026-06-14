@@ -7,6 +7,7 @@
 #include "voxel_scene.h"
 #include "voxel_scene_data.h"
 #include "voxel_scene_format_loader.h"
+#include "voxel_structure_registry.h"
 #include "voxel_world.h"
 
 #include "core/io/resource_loader.h"
@@ -28,6 +29,7 @@ void initialize_voxel_world_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(VoxelBlockRegistry);
 		GDREGISTER_CLASS(VoxelSceneData);
 		GDREGISTER_CLASS(VoxelScene);
+		GDREGISTER_CLASS(VoxelStructureRegistry);
 		GDREGISTER_CLASS(VoxelWorld);
 
 		voxel_scene_loader.instantiate();

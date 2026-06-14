@@ -5,6 +5,7 @@
 #include "core/string/ustring.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
+#include "core/variant/variant.h"
 #include "scene/resources/material.h"
 #include "scene/resources/texture.h"
 
@@ -28,6 +29,10 @@ static constexpr int VOXEL_BLOCK_WOOD = 7;
 static constexpr int VOXEL_BLOCK_LEAVES = 8;
 static constexpr int VOXEL_BLOCK_BEDROCK = 9;
 static constexpr int VOXEL_BLOCK_TORCH = 10;
+static constexpr int VOXEL_BLOCK_BIOLUMEN_PLANT = 11;
+static constexpr int VOXEL_BLOCK_BIO_RESIN = 12;
+static constexpr int VOXEL_BLOCK_RUSTED_PANEL = 13;
+static constexpr int VOXEL_BLOCK_BEACON_CORE = 14;
 
 // Dynamic block registry: single source of truth for all block definitions.
 // Blocks are registered at startup, then finalize() builds flat cache arrays
@@ -41,6 +46,16 @@ class VoxelBlockRegistry : public Resource {
 	GDCLASS(VoxelBlockRegistry, Resource);
 
 public:
+	enum BlockShape {
+		BLOCK_SHAPE_CUBE = 0,
+		BLOCK_SHAPE_LOW_CUBE,
+		BLOCK_SHAPE_CROSS_PLANT,
+		BLOCK_SHAPE_PANE,
+		BLOCK_SHAPE_FENCE,
+		BLOCK_SHAPE_LADDER,
+		BLOCK_SHAPE_MAX,
+	};
+
 	// One entry in a block's tool interaction matrix.
 	// A block can have multiple entries — one per (tool_type × min_tier) combination.
 	struct BlockToolEntry {
@@ -56,8 +71,15 @@ public:
 		Ref<Texture2D> texture_side;
 		Ref<Texture2D> texture_bottom;
 		Ref<ShaderMaterial> shader_material;
+		BlockShape shape = BLOCK_SHAPE_CUBE;
 		float mesh_height = 1.0f;
 		float collision_height = 1.0f;
+		PackedStringArray tags;
+		StringName resource_id;
+		StringName hazard_id;
+		float hazard_strength = 0.0f;
+		bool is_fluid = false;
+		bool replaceable = false;
 		// --- Physics & identity ---
 		Color color = Color(1, 1, 1);
 		bool solid = true;
@@ -87,6 +109,9 @@ private:
 	Vector<uint8_t> cache_emission;
 	Vector<uint8_t> cache_light_opacity;
 	Vector<Color> cache_light_color;
+	Vector<uint8_t> cache_shape;
+	Vector<bool> cache_is_fluid;
+	Vector<bool> cache_replaceable;
 
 	void _build_cache();
 
@@ -97,6 +122,9 @@ protected:
 	static void _bind_methods();
 
 public:
+	static BlockShape shape_from_variant(const Variant &p_value);
+	static String shape_to_string(BlockShape p_shape);
+
 	// --- Registration API ---
 	int register_block(const String &p_name, const Dictionary &p_properties = Dictionary());
 	int register_block_at(const String &p_name, int p_id, const Dictionary &p_properties = Dictionary());
@@ -127,11 +155,33 @@ public:
 	Ref<ShaderMaterial> get_block_shader_material(int p_id) const;
 	bool block_has_shader(int p_id) const;
 
+	void set_block_shape(int p_id, BlockShape p_shape);
+	BlockShape get_block_shape(int p_id) const;
+
 	void set_block_mesh_height(int p_id, float p_height);
 	float get_block_mesh_height(int p_id) const;
 
 	void set_block_collision_height(int p_id, float p_height);
 	float get_block_collision_height(int p_id) const;
+
+	void set_block_tags(int p_id, const PackedStringArray &p_tags);
+	PackedStringArray get_block_tags(int p_id) const;
+	bool block_has_tag(int p_id, const StringName &p_tag) const;
+
+	void set_block_resource_id(int p_id, const StringName &p_resource_id);
+	StringName get_block_resource_id(int p_id) const;
+
+	void set_block_hazard_id(int p_id, const StringName &p_hazard_id);
+	StringName get_block_hazard_id(int p_id) const;
+
+	void set_block_hazard_strength(int p_id, float p_strength);
+	float get_block_hazard_strength(int p_id) const;
+
+	void set_block_is_fluid(int p_id, bool p_is_fluid);
+	bool get_block_is_fluid(int p_id) const;
+
+	void set_block_replaceable(int p_id, bool p_replaceable);
+	bool get_block_replaceable(int p_id) const;
 
 	void set_block_color(int p_id, const Color &p_color);
 	Color get_block_color(int p_id) const;
@@ -224,12 +274,29 @@ public:
 		}
 		return Color(1, 1, 1);
 	}
+	_FORCE_INLINE_ BlockShape get_cached_shape(int p_id) const {
+		if (p_id >= 0 && p_id < cache_shape.size()) {
+			return (BlockShape)cache_shape[p_id];
+		}
+		return BLOCK_SHAPE_CUBE;
+	}
+	_FORCE_INLINE_ bool is_fluid_cached(int p_id) const {
+		return p_id >= 0 && p_id < cache_is_fluid.size() && cache_is_fluid[p_id];
+	}
+	_FORCE_INLINE_ bool is_replaceable_cached(int p_id) const {
+		return p_id >= 0 && p_id < cache_replaceable.size() && cache_replaceable[p_id];
+	}
 
 	// Direct access to cache arrays for passing to worker threads.
 	const Vector<bool> &get_cache_solid() const { return cache_solid; }
 	const Vector<bool> &get_cache_transparent() const { return cache_transparent; }
 	const Vector<uint8_t> &get_cache_emission() const { return cache_emission; }
 	const Vector<uint8_t> &get_cache_light_opacity() const { return cache_light_opacity; }
+	const Vector<uint8_t> &get_cache_shape() const { return cache_shape; }
+	const Vector<bool> &get_cache_is_fluid() const { return cache_is_fluid; }
+	const Vector<bool> &get_cache_replaceable() const { return cache_replaceable; }
 
 	VoxelBlockRegistry();
 };
+
+VARIANT_ENUM_CAST(VoxelBlockRegistry::BlockShape);

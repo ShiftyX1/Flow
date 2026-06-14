@@ -212,8 +212,10 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 				}
 
 				bool solid = use_registry ? reg->is_solid(type) : true;
+				VoxelBlockRegistry::BlockShape shape = use_registry ? reg->get_cached_shape(type) : VoxelBlockRegistry::BLOCK_SHAPE_CUBE;
+				const bool custom_shape = shape != VoxelBlockRegistry::BLOCK_SHAPE_CUBE;
 				if (!solid) {
-					if (!use_registry || !reg->block_has_shader(type)) {
+					if ((!use_registry || !reg->block_has_shader(type)) && !custom_shape) {
 						continue;
 					}
 				}
@@ -252,6 +254,78 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 				const float top_y = bs * mesh_h;
 
 				// Shared array for vertex lights — filled per face.
+				auto get_custom_surface = [&](const Ref<Texture2D> &p_tex) -> SurfaceData * {
+					if (block_shader.is_valid()) {
+						if (!shader_surfaces.has(type)) {
+							ShaderSurfaceInfo info;
+							info.shader_material = block_shader;
+							info.texture = p_tex;
+							shader_surfaces[type] = info;
+						}
+						return &shader_surfaces[type].surface;
+					}
+					if (p_tex.is_valid()) {
+						if (!textured_block_types.has(p_tex)) {
+							textured_block_types[p_tex] = type;
+						}
+						return &textured_surfaces[p_tex];
+					}
+					return &untextured_surface;
+				};
+
+				auto add_double_sided_face = [&](SurfaceData &r_surface, const Vector3 &p_v0, const Vector3 &p_v1, const Vector3 &p_v2, const Vector3 &p_v3, const Vector3 &p_normal, const Color &p_color, bool p_has_uv) {
+					add_face(r_surface, p_v0, p_v1, p_v2, p_v3, p_normal, p_color, p_has_uv, true);
+					add_face(r_surface, p_v3, p_v2, p_v1, p_v0, -p_normal, p_color, p_has_uv, true);
+				};
+
+				if (shape == VoxelBlockRegistry::BLOCK_SHAPE_CROSS_PLANT ||
+						shape == VoxelBlockRegistry::BLOCK_SHAPE_PANE ||
+						shape == VoxelBlockRegistry::BLOCK_SHAPE_LADDER) {
+					Ref<Texture2D> tex = tex_side.is_valid() ? tex_side : (tex_top.is_valid() ? tex_top : tex_bottom);
+					SurfaceData *surf = get_custom_surface(tex);
+					Color face_col = tex.is_valid() ? Color(1, 1, 1) : col;
+					if (shape == VoxelBlockRegistry::BLOCK_SHAPE_CROSS_PLANT) {
+						add_double_sided_face(*surf,
+								origin + Vector3(0, 0, 0), origin + Vector3(0, top_y, 0),
+								origin + Vector3(bs, top_y, bs), origin + Vector3(bs, 0, bs),
+								Vector3(-0.707f, 0, 0.707f), face_col, tex.is_valid());
+						add_double_sided_face(*surf,
+								origin + Vector3(bs, 0, 0), origin + Vector3(bs, top_y, 0),
+								origin + Vector3(0, top_y, bs), origin + Vector3(0, 0, bs),
+								Vector3(0.707f, 0, 0.707f), face_col, tex.is_valid());
+					} else if (shape == VoxelBlockRegistry::BLOCK_SHAPE_LADDER) {
+						const float z = bs * 0.04f;
+						add_double_sided_face(*surf,
+								origin + Vector3(0, 0, z), origin + Vector3(0, top_y, z),
+								origin + Vector3(bs, top_y, z), origin + Vector3(bs, 0, z),
+								Vector3(0, 0, -1), face_col, tex.is_valid());
+					} else {
+						const float z = bs * 0.5f;
+						add_double_sided_face(*surf,
+								origin + Vector3(0, 0, z), origin + Vector3(0, top_y, z),
+								origin + Vector3(bs, top_y, z), origin + Vector3(bs, 0, z),
+								Vector3(0, 0, -1), face_col, tex.is_valid());
+					}
+					continue;
+				}
+
+				if (shape == VoxelBlockRegistry::BLOCK_SHAPE_FENCE) {
+					Ref<Texture2D> tex = tex_side.is_valid() ? tex_side : (tex_top.is_valid() ? tex_top : tex_bottom);
+					SurfaceData *surf = get_custom_surface(tex);
+					Color face_col = tex.is_valid() ? Color(1, 1, 1) : col;
+					const float min_p = bs * 0.35f;
+					const float max_p = bs * 0.65f;
+					const Vector3 bmin = origin + Vector3(min_p, 0, min_p);
+					const Vector3 bmax = origin + Vector3(max_p, top_y, max_p);
+					add_face(*surf, Vector3(bmax.x, bmin.y, bmin.z), Vector3(bmax.x, bmax.y, bmin.z), Vector3(bmax.x, bmax.y, bmax.z), Vector3(bmax.x, bmin.y, bmax.z), Vector3(1, 0, 0), face_col, tex.is_valid(), true);
+					add_face(*surf, Vector3(bmin.x, bmin.y, bmax.z), Vector3(bmin.x, bmax.y, bmax.z), Vector3(bmin.x, bmax.y, bmin.z), Vector3(bmin.x, bmin.y, bmin.z), Vector3(-1, 0, 0), face_col, tex.is_valid(), true);
+					add_face(*surf, Vector3(bmin.x, bmax.y, bmin.z), Vector3(bmin.x, bmax.y, bmax.z), Vector3(bmax.x, bmax.y, bmax.z), Vector3(bmax.x, bmax.y, bmin.z), Vector3(0, 1, 0), face_col, tex.is_valid(), false);
+					add_face(*surf, Vector3(bmin.x, bmin.y, bmax.z), Vector3(bmin.x, bmin.y, bmin.z), Vector3(bmax.x, bmin.y, bmin.z), Vector3(bmax.x, bmin.y, bmax.z), Vector3(0, -1, 0), face_col, tex.is_valid(), false);
+					add_face(*surf, Vector3(bmax.x, bmin.y, bmax.z), Vector3(bmax.x, bmax.y, bmax.z), Vector3(bmin.x, bmax.y, bmax.z), Vector3(bmin.x, bmin.y, bmax.z), Vector3(0, 0, 1), face_col, tex.is_valid(), true);
+					add_face(*surf, Vector3(bmin.x, bmin.y, bmin.z), Vector3(bmin.x, bmax.y, bmin.z), Vector3(bmax.x, bmax.y, bmin.z), Vector3(bmax.x, bmin.y, bmin.z), Vector3(0, 0, -1), face_col, tex.is_valid(), true);
+					continue;
+				}
+
 				VertexLight vl[4];
 				auto fill_face_vl = [&](const Vector3 &normal, const FaceCorners &corners) {
 					for (int i = 0; i < 4; i++) {

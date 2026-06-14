@@ -89,7 +89,7 @@ public:
 	// Remove all biomes.
 	void clear();
 
-	// Populate with the 4 built-in biomes (desert, meadow, forest, mountains).
+	// Populate with built-in biomes used by the base world slice.
 	void setup_defaults();
 
 	// Query.

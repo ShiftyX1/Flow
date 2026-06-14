@@ -193,6 +193,46 @@ void VoxelBiomeRegistry::setup_defaults() {
 
 		add_biome("meadow", props);
 	}
+
+	// Restored forest: N.U.L.L-accelerated woodland with luminous understory.
+	{
+		Dictionary props;
+		props["height_base"] = 1.5f;
+		props["height_scale"] = 17.0f;
+		props["detail_scale"] = 3.4f;
+		props["density_3d_weight"] = 0.55f;
+		props["temperature"] = 0.20f;
+		props["humidity"] = 0.75f;
+		props["surface_block"] = VOXEL_BLOCK_GRASS;
+		props["subsurface_block"] = VOXEL_BLOCK_DIRT;
+		props["shore_block"] = VOXEL_BLOCK_SAND;
+		props["snow_block"] = VOXEL_BLOCK_SNOW;
+		props["snow_line"] = 170;
+
+		Array features;
+		Dictionary tree;
+		tree["type"] = "tree";
+		tree["trunk_block"] = VOXEL_BLOCK_WOOD;
+		tree["canopy_block"] = VOXEL_BLOCK_LEAVES;
+		tree["density"] = 220;
+		tree["min_trunk"] = 5;
+		tree["max_trunk"] = 8;
+		tree["canopy_radius"] = 3;
+		tree["canopy_shape"] = "sphere";
+		features.push_back(tree);
+
+		Dictionary plant;
+		plant["type"] = "scatter";
+		plant["block"] = VOXEL_BLOCK_BIOLUMEN_PLANT;
+		plant["density"] = 45;
+		plant["min_y"] = 54;
+		plant["max_y"] = 170;
+		plant["surface_only"] = true;
+		features.push_back(plant);
+
+		props["features"] = features;
+		add_biome("restored_forest", props);
+	}
 }
 
 // ===========================================================================

@@ -211,6 +211,10 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					continue;
 				}
 
+				if (use_registry && reg->get_cached_visual_mode(type) != VoxelBlockRegistry::VISUAL_MODE_VOXEL) {
+					continue;
+				}
+
 				bool solid = use_registry ? reg->is_solid(type) : true;
 				VoxelBlockRegistry::BlockShape shape = use_registry ? reg->get_cached_shape(type) : VoxelBlockRegistry::BLOCK_SHAPE_CUBE;
 				const bool custom_shape = shape != VoxelBlockRegistry::BLOCK_SHAPE_CUBE;
@@ -677,6 +681,9 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_volume_mesh(const Vector<uin
 			for (int x = 0; x < p_size.x; x++) {
 				int type = (int)blocks[volume_index(x, y, z, p_size)];
 				if (type == VOXEL_BLOCK_AIR) {
+					continue;
+				}
+				if (use_registry && reg->get_cached_visual_mode(type) != VoxelBlockRegistry::VISUAL_MODE_VOXEL) {
 					continue;
 				}
 				bool solid = use_registry ? reg->is_solid(type) : true;

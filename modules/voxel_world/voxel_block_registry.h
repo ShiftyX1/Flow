@@ -2,11 +2,14 @@
 
 #include "core/io/resource.h"
 #include "core/math/color.h"
+#include "core/math/vector3.h"
 #include "core/string/ustring.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 #include "core/variant/variant.h"
 #include "scene/resources/material.h"
+#include "scene/resources/mesh.h"
+#include "scene/resources/packed_scene.h"
 #include "scene/resources/texture.h"
 
 // The only hardcoded block convention: ID 0 is always AIR.
@@ -56,6 +59,13 @@ public:
 		BLOCK_SHAPE_MAX,
 	};
 
+	enum VisualMode {
+		VISUAL_MODE_VOXEL = 0,
+		VISUAL_MODE_MODEL_MESH,
+		VISUAL_MODE_MODEL_SCENE,
+		VISUAL_MODE_MAX,
+	};
+
 	// One entry in a block's tool interaction matrix.
 	// A block can have multiple entries — one per (tool_type × min_tier) combination.
 	struct BlockToolEntry {
@@ -72,6 +82,13 @@ public:
 		Ref<Texture2D> texture_bottom;
 		Ref<ShaderMaterial> shader_material;
 		BlockShape shape = BLOCK_SHAPE_CUBE;
+		VisualMode visual_mode = VISUAL_MODE_VOXEL;
+		Ref<Mesh> model_mesh;
+		Ref<PackedScene> model_scene;
+		Vector3 model_offset;
+		float model_rotation_y = 0.0f;
+		Vector3 model_scale = Vector3(1, 1, 1);
+		Dictionary animation_state_map;
 		float mesh_height = 1.0f;
 		float collision_height = 1.0f;
 		PackedStringArray tags;
@@ -110,6 +127,7 @@ private:
 	Vector<uint8_t> cache_light_opacity;
 	Vector<Color> cache_light_color;
 	Vector<uint8_t> cache_shape;
+	Vector<uint8_t> cache_visual_mode;
 	Vector<bool> cache_is_fluid;
 	Vector<bool> cache_replaceable;
 
@@ -124,6 +142,8 @@ protected:
 public:
 	static BlockShape shape_from_variant(const Variant &p_value);
 	static String shape_to_string(BlockShape p_shape);
+	static VisualMode visual_mode_from_variant(const Variant &p_value);
+	static String visual_mode_to_string(VisualMode p_mode);
 
 	// --- Registration API ---
 	int register_block(const String &p_name, const Dictionary &p_properties = Dictionary());
@@ -157,6 +177,28 @@ public:
 
 	void set_block_shape(int p_id, BlockShape p_shape);
 	BlockShape get_block_shape(int p_id) const;
+
+	void set_block_visual_mode(int p_id, VisualMode p_mode);
+	VisualMode get_block_visual_mode(int p_id) const;
+	bool block_has_model_visual(int p_id) const;
+
+	void set_block_model_mesh(int p_id, const Ref<Mesh> &p_mesh);
+	Ref<Mesh> get_block_model_mesh(int p_id) const;
+
+	void set_block_model_scene(int p_id, const Ref<PackedScene> &p_scene);
+	Ref<PackedScene> get_block_model_scene(int p_id) const;
+
+	void set_block_model_offset(int p_id, const Vector3 &p_offset);
+	Vector3 get_block_model_offset(int p_id) const;
+
+	void set_block_model_rotation_y(int p_id, float p_degrees);
+	float get_block_model_rotation_y(int p_id) const;
+
+	void set_block_model_scale(int p_id, const Vector3 &p_scale);
+	Vector3 get_block_model_scale(int p_id) const;
+
+	void set_block_animation_state_map(int p_id, const Dictionary &p_map);
+	Dictionary get_block_animation_state_map(int p_id) const;
 
 	void set_block_mesh_height(int p_id, float p_height);
 	float get_block_mesh_height(int p_id) const;
@@ -280,6 +322,12 @@ public:
 		}
 		return BLOCK_SHAPE_CUBE;
 	}
+	_FORCE_INLINE_ VisualMode get_cached_visual_mode(int p_id) const {
+		if (p_id >= 0 && p_id < cache_visual_mode.size()) {
+			return (VisualMode)cache_visual_mode[p_id];
+		}
+		return VISUAL_MODE_VOXEL;
+	}
 	_FORCE_INLINE_ bool is_fluid_cached(int p_id) const {
 		return p_id >= 0 && p_id < cache_is_fluid.size() && cache_is_fluid[p_id];
 	}
@@ -300,3 +348,4 @@ public:
 };
 
 VARIANT_ENUM_CAST(VoxelBlockRegistry::BlockShape);
+VARIANT_ENUM_CAST(VoxelBlockRegistry::VisualMode);

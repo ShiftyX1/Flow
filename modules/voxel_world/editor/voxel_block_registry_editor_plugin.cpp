@@ -1,7 +1,6 @@
 #include "voxel_block_registry_editor_plugin.h"
 
 #include "../voxel_block_registry.h"
-#include "../voxel_block_registry.h"
 
 #include "core/object/callable_mp.h"
 #include "editor/editor_undo_redo_manager.h"
@@ -14,17 +13,62 @@
 #include "scene/gui/label.h"
 #include "scene/gui/line_edit.h"
 #include "scene/gui/margin_container.h"
+#include "scene/gui/option_button.h"
 #include "scene/gui/separator.h"
 #include "scene/gui/spin_box.h"
 #include "scene/scene_string_names.h"
+
+namespace {
+
+String _get_animation_state_value(const Dictionary &p_map, const StringName &p_key) {
+	if (p_map.has(p_key)) {
+		return String(p_map[p_key]);
+	}
+	const String key_text = String(p_key);
+	if (p_map.has(key_text)) {
+		return String(p_map[key_text]);
+	}
+	return String();
+}
+
+void _erase_animation_state_key(Dictionary &r_map, const StringName &p_key) {
+	r_map.erase(p_key);
+	r_map.erase(String(p_key));
+}
+
+void _set_vector_axis(Vector3 &r_vector, int p_axis, double p_value) {
+	switch (p_axis) {
+		case 0:
+			r_vector.x = (float)p_value;
+			break;
+		case 1:
+			r_vector.y = (float)p_value;
+			break;
+		case 2:
+			r_vector.z = (float)p_value;
+			break;
+	}
+}
+
+SpinBox *_make_model_spin_box(double p_min, double p_max, double p_step, double p_value) {
+	SpinBox *spin = memnew(SpinBox);
+	spin->set_min(p_min);
+	spin->set_max(p_max);
+	spin->set_step(p_step);
+	spin->set_value(p_value);
+	spin->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	return spin;
+}
+
+} // namespace
 
 // ============================================================
 // VoxelBlockRegistryEditorDialog
 // ============================================================
 
 VoxelBlockRegistryEditorDialog::VoxelBlockRegistryEditorDialog() {
-	set_title("Voxel Block Registry — Texture & Shader Editor");
-	set_min_size(Size2(800 * EDSCALE, 500 * EDSCALE));
+	set_title("Voxel Block Registry - Visual Editor");
+	set_min_size(Size2(960 * EDSCALE, 560 * EDSCALE));
 
 	// Hide the built-in message label so only our content shows.
 	get_label()->hide();
@@ -48,6 +92,58 @@ VoxelBlockRegistryEditorDialog::VoxelBlockRegistryEditorDialog() {
 void VoxelBlockRegistryEditorDialog::set_registry(const Ref<VoxelBlockRegistry> &p_registry) {
 	registry = p_registry;
 	_rebuild_block_list();
+}
+
+VoxelBlockRegistryEditorDialog::BlockRow *VoxelBlockRegistryEditorDialog::_find_block_row(int p_block_id) {
+	for (int i = 0; i < block_rows.size(); i++) {
+		if (block_rows[i].block_id == p_block_id) {
+			return &block_rows.write[i];
+		}
+	}
+	return nullptr;
+}
+
+void VoxelBlockRegistryEditorDialog::_update_visual_controls_enabled(int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	BlockRow *row = _find_block_row(p_block_id);
+	if (row == nullptr) {
+		return;
+	}
+
+	const VoxelBlockRegistry::VisualMode mode = registry->get_block_visual_mode(p_block_id);
+	const bool model_mode = mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_MESH || mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE;
+	const bool mesh_mode = mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_MESH;
+	const bool scene_mode = mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE;
+
+	if (row->picker_model_mesh != nullptr) {
+		row->picker_model_mesh->set_editable(mesh_mode);
+	}
+	if (row->picker_model_scene != nullptr) {
+		row->picker_model_scene->set_editable(scene_mode);
+	}
+	for (int i = 0; i < 3; i++) {
+		if (row->spin_model_offset[i] != nullptr) {
+			row->spin_model_offset[i]->set_editable(model_mode);
+		}
+		if (row->spin_model_scale[i] != nullptr) {
+			row->spin_model_scale[i]->set_editable(model_mode);
+		}
+	}
+	if (row->spin_model_rotation_y != nullptr) {
+		row->spin_model_rotation_y->set_editable(model_mode);
+	}
+	if (row->edit_animation_idle != nullptr) {
+		row->edit_animation_idle->set_editable(scene_mode);
+	}
+	if (row->edit_animation_active != nullptr) {
+		row->edit_animation_active->set_editable(scene_mode);
+	}
+	if (row->edit_animation_open != nullptr) {
+		row->edit_animation_open->set_editable(scene_mode);
+	}
 }
 
 void VoxelBlockRegistryEditorDialog::_texture_changed(const Ref<Resource> &p_resource, int p_block_id, int p_face) {
@@ -92,6 +188,146 @@ void VoxelBlockRegistryEditorDialog::_shader_changed(const Ref<Resource> &p_reso
 	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/shader_material", p_block_id), mat);
 	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/shader_material", p_block_id), registry->get_block_shader_material(p_block_id));
 	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_visual_mode_selected(int p_index, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	VoxelBlockRegistry::VisualMode mode = VoxelBlockRegistry::VISUAL_MODE_VOXEL;
+	if (p_index == VoxelBlockRegistry::VISUAL_MODE_MODEL_MESH) {
+		mode = VoxelBlockRegistry::VISUAL_MODE_MODEL_MESH;
+	} else if (p_index == VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE) {
+		mode = VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE;
+	}
+
+	const VoxelBlockRegistry::VisualMode old_mode = registry->get_block_visual_mode(p_block_id);
+	if (old_mode == mode) {
+		_update_visual_controls_enabled(p_block_id);
+		return;
+	}
+
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Visual Mode");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/visual_mode", p_block_id), VoxelBlockRegistry::visual_mode_to_string(mode));
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/visual_mode", p_block_id), VoxelBlockRegistry::visual_mode_to_string(old_mode));
+	undo_redo->commit_action();
+	_update_visual_controls_enabled(p_block_id);
+}
+
+void VoxelBlockRegistryEditorDialog::_model_mesh_changed(const Ref<Resource> &p_resource, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	Ref<Mesh> mesh = p_resource;
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Model Mesh");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/model_mesh", p_block_id), mesh);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/model_mesh", p_block_id), registry->get_block_model_mesh(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_model_scene_changed(const Ref<Resource> &p_resource, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	Ref<PackedScene> scene = p_resource;
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Model Scene");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/model_scene", p_block_id), scene);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/model_scene", p_block_id), registry->get_block_model_scene(p_block_id));
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_model_offset_axis_changed(double p_value, int p_block_id, int p_axis) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	const Vector3 old_offset = registry->get_block_model_offset(p_block_id);
+	Vector3 new_offset = old_offset;
+	_set_vector_axis(new_offset, p_axis, p_value);
+	if (old_offset == new_offset) {
+		return;
+	}
+
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Model Offset", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/model_offset", p_block_id), new_offset);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/model_offset", p_block_id), old_offset);
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_model_rotation_y_changed(double p_value, int p_block_id) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	const float old_rotation = registry->get_block_model_rotation_y(p_block_id);
+	const float new_rotation = (float)p_value;
+	if (old_rotation == new_rotation) {
+		return;
+	}
+
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Model Rotation", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/model_rotation_y", p_block_id), new_rotation);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/model_rotation_y", p_block_id), old_rotation);
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_model_scale_axis_changed(double p_value, int p_block_id, int p_axis) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	const Vector3 old_scale = registry->get_block_model_scale(p_block_id);
+	Vector3 new_scale = old_scale;
+	_set_vector_axis(new_scale, p_axis, p_value);
+	if (old_scale == new_scale) {
+		return;
+	}
+
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Model Scale", UndoRedo::MERGE_ENDS);
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/model_scale", p_block_id), new_scale);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/model_scale", p_block_id), old_scale);
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_animation_state_submitted(const String &p_text, int p_block_id, const StringName &p_key) {
+	if (registry.is_null()) {
+		return;
+	}
+
+	Dictionary old_map = registry->get_block_animation_state_map(p_block_id);
+	const String old_value = _get_animation_state_value(old_map, p_key);
+	const String new_value = p_text.strip_edges();
+	if (old_value == new_value) {
+		return;
+	}
+
+	Dictionary new_map = old_map.duplicate();
+	_erase_animation_state_key(new_map, p_key);
+	if (!new_value.is_empty()) {
+		new_map[p_key] = new_value;
+	}
+
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	undo_redo->create_action("Set Block Animation State");
+	undo_redo->add_do_property(registry.ptr(), vformat("block/%d/animation_state_map", p_block_id), new_map);
+	undo_redo->add_undo_property(registry.ptr(), vformat("block/%d/animation_state_map", p_block_id), old_map);
+	undo_redo->commit_action();
+}
+
+void VoxelBlockRegistryEditorDialog::_animation_state_focus_exited(LineEdit *p_line_edit, int p_block_id, const StringName &p_key) {
+	if (p_line_edit == nullptr) {
+		return;
+	}
+	_animation_state_submitted(p_line_edit->get_text(), p_block_id, p_key);
 }
 
 void VoxelBlockRegistryEditorDialog::_solid_toggled(bool p_pressed, int p_block_id) {
@@ -397,6 +633,195 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 			row.picker_shader = picker;
 		}
 
+		// --- Model visual section ---
+		HBoxContainer *visual_header_row = memnew(HBoxContainer);
+		visual_header_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(visual_header_row);
+
+		{
+			Label *lbl = memnew(Label);
+			lbl->set_text("Visual:");
+			lbl->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			visual_header_row->add_child(lbl);
+		}
+
+		const VoxelBlockRegistry::VisualMode visual_mode = registry->has_block(block_id) ? registry->get_block_visual_mode(block_id) : VoxelBlockRegistry::VISUAL_MODE_VOXEL;
+		const bool model_mode = visual_mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_MESH || visual_mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE;
+		const bool mesh_mode = visual_mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_MESH;
+		const bool scene_mode = visual_mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE;
+
+		HBoxContainer *visual_row = memnew(HBoxContainer);
+		visual_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(visual_row);
+
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			visual_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text("Mode");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			OptionButton *option = memnew(OptionButton);
+			option->add_item("Voxel");
+			option->add_item("Model Mesh");
+			option->add_item("Model Scene");
+			option->select((int)visual_mode);
+			option->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			option->connect("item_selected", callable_mp(this, &VoxelBlockRegistryEditorDialog::_visual_mode_selected).bind(block_id));
+			slot->add_child(option);
+			row.option_visual_mode = option;
+		}
+
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			visual_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text("Model Mesh");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			EditorResourcePicker *picker = memnew(EditorResourcePicker);
+			picker->set_base_type("Mesh");
+			picker->set_editable(mesh_mode);
+			picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			if (registry->has_block(block_id)) {
+				Ref<Mesh> current_mesh = registry->get_block_model_mesh(block_id);
+				if (current_mesh.is_valid()) {
+					picker->set_edited_resource(current_mesh);
+				}
+			}
+			picker->connect("resource_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_model_mesh_changed).bind(block_id));
+			slot->add_child(picker);
+			row.picker_model_mesh = picker;
+		}
+
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			visual_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text("Model Scene");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			EditorResourcePicker *picker = memnew(EditorResourcePicker);
+			picker->set_base_type("PackedScene");
+			picker->set_editable(scene_mode);
+			picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			if (registry->has_block(block_id)) {
+				Ref<PackedScene> current_scene = registry->get_block_model_scene(block_id);
+				if (current_scene.is_valid()) {
+					picker->set_edited_resource(current_scene);
+				}
+			}
+			picker->connect("resource_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_model_scene_changed).bind(block_id));
+			slot->add_child(picker);
+			row.picker_model_scene = picker;
+		}
+
+		HBoxContainer *transform_row = memnew(HBoxContainer);
+		transform_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(transform_row);
+
+		const Vector3 model_offset = registry->has_block(block_id) ? registry->get_block_model_offset(block_id) : Vector3();
+		const float model_rotation_y = registry->has_block(block_id) ? registry->get_block_model_rotation_y(block_id) : 0.0f;
+		const Vector3 model_scale = registry->has_block(block_id) ? registry->get_block_model_scale(block_id) : Vector3(1, 1, 1);
+		const char *axis_names[3] = { "X", "Y", "Z" };
+
+		for (int axis = 0; axis < 3; axis++) {
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			transform_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text(vformat("Offset %s", axis_names[axis]));
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			const double value = axis == 0 ? model_offset.x : (axis == 1 ? model_offset.y : model_offset.z);
+			SpinBox *spin = _make_model_spin_box(-1024.0, 1024.0, 0.05, value);
+			spin->set_editable(model_mode);
+			spin->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_model_offset_axis_changed).bind(block_id, axis));
+			slot->add_child(spin);
+			row.spin_model_offset[axis] = spin;
+		}
+
+		{
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			transform_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text("Rot Y");
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			SpinBox *spin = _make_model_spin_box(-3600.0, 3600.0, 0.1, model_rotation_y);
+			spin->set_editable(model_mode);
+			spin->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_model_rotation_y_changed).bind(block_id));
+			slot->add_child(spin);
+			row.spin_model_rotation_y = spin;
+		}
+
+		for (int axis = 0; axis < 3; axis++) {
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			transform_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text(vformat("Scale %s", axis_names[axis]));
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			const double value = axis == 0 ? model_scale.x : (axis == 1 ? model_scale.y : model_scale.z);
+			SpinBox *spin = _make_model_spin_box(-100.0, 100.0, 0.05, value);
+			spin->set_editable(model_mode);
+			spin->connect("value_changed", callable_mp(this, &VoxelBlockRegistryEditorDialog::_model_scale_axis_changed).bind(block_id, axis));
+			slot->add_child(spin);
+			row.spin_model_scale[axis] = spin;
+		}
+
+		HBoxContainer *animation_row = memnew(HBoxContainer);
+		animation_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		block_list_vbox->add_child(animation_row);
+
+		Dictionary animation_map = registry->has_block(block_id) ? registry->get_block_animation_state_map(block_id) : Dictionary();
+		const StringName animation_keys[3] = { StringName("idle"), StringName("active"), StringName("open") };
+		const char *animation_labels[3] = { "Idle", "Active", "Open" };
+		for (int i = 0; i < 3; i++) {
+			VBoxContainer *slot = memnew(VBoxContainer);
+			slot->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			animation_row->add_child(slot);
+
+			Label *lbl = memnew(Label);
+			lbl->set_text(vformat("%s Animation", animation_labels[i]));
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+			slot->add_child(lbl);
+
+			LineEdit *edit = memnew(LineEdit);
+			edit->set_text(_get_animation_state_value(animation_map, animation_keys[i]));
+			edit->set_placeholder(animation_labels[i]);
+			edit->set_editable(scene_mode);
+			edit->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+			edit->connect("text_submitted", callable_mp(this, &VoxelBlockRegistryEditorDialog::_animation_state_submitted).bind(block_id, animation_keys[i]));
+			edit->connect("focus_exited", callable_mp(this, &VoxelBlockRegistryEditorDialog::_animation_state_focus_exited).bind(edit, block_id, animation_keys[i]));
+			slot->add_child(edit);
+
+			if (i == 0) {
+				row.edit_animation_idle = edit;
+			} else if (i == 1) {
+				row.edit_animation_active = edit;
+			} else {
+				row.edit_animation_open = edit;
+			}
+		}
+
 		// --- Physics & Lighting section ---
 		HBoxContainer *phys_row = memnew(HBoxContainer);
 		phys_row->set_h_size_flags(Control::SIZE_EXPAND_FILL);
@@ -664,7 +1089,7 @@ VoxelBlockRegistryInspectorButton::VoxelBlockRegistryInspectorButton() {
 	add_child(dialog);
 
 	edit_button = memnew(Button);
-	edit_button->set_text("Edit Block Textures & Shaders...");
+	edit_button->set_text("Edit Block Visuals...");
 	edit_button->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	edit_button->set_custom_minimum_size(Size2(0, 36 * EDSCALE));
 	edit_button->connect(SceneStringName(pressed), callable_mp(this, &VoxelBlockRegistryInspectorButton::_on_edit_pressed));
@@ -678,7 +1103,7 @@ void VoxelBlockRegistryInspectorButton::set_registry(const Ref<VoxelBlockRegistr
 	// Show block count on button.
 	if (p_registry.is_valid()) {
 		int count = p_registry->get_block_count();
-		edit_button->set_text(vformat("Edit Block Textures & Shaders (%d blocks)...", count));
+		edit_button->set_text(vformat("Edit Block Visuals (%d blocks)...", count));
 	}
 }
 

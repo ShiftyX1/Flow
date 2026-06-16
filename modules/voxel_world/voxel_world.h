@@ -20,6 +20,8 @@
 #include "scene/resources/environment.h"
 #include "scene/resources/material.h"
 
+class AnimationPlayer;
+
 class VoxelWorld : public Node3D {
 	GDCLASS(VoxelWorld, Node3D);
 
@@ -171,6 +173,18 @@ private:
 	void _spawn_block_light(const Vector3i &p_block_pos, int p_type);
 	void _remove_block_light(const Vector3i &p_block_pos);
 	void _scan_chunk_for_lights(VoxelChunk *p_chunk);
+
+	// Runtime model nodes for rare model-backed blocks. Not saved; rebuilt from block data.
+	HashMap<Vector3i, Node3D *> block_model_nodes;
+	Node3D *_spawn_block_model(const Vector3i &p_block_pos, int p_type);
+	void _remove_block_model(const Vector3i &p_block_pos);
+	void _scan_chunk_for_block_models(VoxelChunk *p_chunk);
+	void _remove_block_models_in_chunk(const Vector2i &p_key);
+	AnimationPlayer *_find_block_model_animation_player(Node *p_root) const;
+	StringName _select_block_model_animation(const Vector3i &p_block_pos, int p_type) const;
+	void _play_block_model_animation(const Vector3i &p_block_pos, int p_type);
+	void _refresh_block_model_animation_at(const Vector3i &p_block_pos);
+	void _refresh_block_model_animations_near_object(const WorldObjectEntry &p_object);
 
 	// Background chunk generation
 	void _initialize_world();

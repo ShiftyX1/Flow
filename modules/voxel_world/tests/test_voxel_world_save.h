@@ -5,6 +5,7 @@
 #pragma once
 
 #include "../voxel_terrain_generator.h"
+#include "../voxel_mesher.h"
 #include "../voxel_structure_registry.h"
 #include "../voxel_world.h"
 #include "../voxel_world_save.h"
@@ -12,6 +13,8 @@
 #include "core/io/config_file.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "scene/animation/animation_player.h"
+#include "scene/resources/3d/primitive_meshes.h"
 #include "tests/test_macros.h"
 
 namespace TestVoxelWorldSave {
@@ -71,6 +74,76 @@ TEST_CASE("[VoxelWorld] Block registry stores world-foundation properties") {
 	CHECK(Math::is_equal_approx(registry->get_block_hazard_strength(id), 2.5f));
 	CHECK(!registry->get_block_is_fluid(id));
 	CHECK(registry->get_block_replaceable(id));
+}
+
+TEST_CASE("[VoxelWorld] Block registry stores model visual properties") {
+	Ref<VoxelBlockRegistry> registry;
+	registry.instantiate();
+
+	Ref<BoxMesh> mesh;
+	mesh.instantiate();
+
+	Node3D *root = memnew(Node3D);
+	AnimationPlayer *player = memnew(AnimationPlayer);
+	root->add_child(player);
+	Ref<PackedScene> scene;
+	scene.instantiate();
+	CHECK(scene->pack(root) == OK);
+	memdelete(root);
+
+	Dictionary animation_map;
+	animation_map["idle"] = "Idle";
+	animation_map["active"] = "Active";
+
+	Dictionary props;
+	props["visual_mode"] = "model_scene";
+	props["model_mesh"] = mesh;
+	props["model_scene"] = scene;
+	props["model_offset"] = Vector3(0.0f, 0.25f, 0.0f);
+	props["model_rotation_y"] = 90.0f;
+	props["model_scale"] = Vector3(1.5f, 1.0f, 1.5f);
+	props["animation_state_map"] = animation_map;
+
+	const int id = registry->register_block("animated_beacon", props);
+	CHECK(registry->get_block_visual_mode(id) == VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE);
+	CHECK(registry->get_block_model_mesh(id) == mesh);
+	CHECK(registry->get_block_model_scene(id) == scene);
+	CHECK(registry->get_block_model_offset(id) == Vector3(0.0f, 0.25f, 0.0f));
+	CHECK(Math::is_equal_approx(registry->get_block_model_rotation_y(id), 90.0f));
+	CHECK(registry->get_block_model_scale(id) == Vector3(1.5f, 1.0f, 1.5f));
+	Dictionary loaded_animation_map = registry->get_block_animation_state_map(id);
+	CHECK(String(loaded_animation_map["active"]) == "Active");
+	CHECK(registry->block_has_model_visual(id));
+}
+
+TEST_CASE("[VoxelWorld] Model visual blocks are skipped by the chunk mesher") {
+	Ref<VoxelBlockRegistry> registry;
+	registry.instantiate();
+	registry->setup_defaults();
+
+	Ref<BoxMesh> mesh;
+	mesh.instantiate();
+
+	Dictionary props;
+	props["visual_mode"] = "model_mesh";
+	props["model_mesh"] = mesh;
+	const int model_id = registry->register_block("model_marker", props);
+	registry->finalize();
+
+	const int total = VoxelTerrainGenerator::CHUNK_SIZE_X * VoxelTerrainGenerator::CHUNK_SIZE_Y * VoxelTerrainGenerator::CHUNK_SIZE_Z;
+	Vector<uint16_t> blocks;
+	blocks.resize(total);
+	for (int i = 0; i < total; i++) {
+		blocks.write[i] = VOXEL_BLOCK_AIR;
+	}
+
+	blocks.write[VoxelTerrainGenerator::block_index(1, 1, 1)] = model_id;
+	Vector<VoxelMesher::MeshSurface> model_surfaces = VoxelMesher::build_chunk_mesh(blocks, 1.0f, registry, VoxelMesher::NeighborBlocks());
+	CHECK(model_surfaces.is_empty());
+
+	blocks.write[VoxelTerrainGenerator::block_index(1, 1, 1)] = VOXEL_BLOCK_STONE;
+	Vector<VoxelMesher::MeshSurface> voxel_surfaces = VoxelMesher::build_chunk_mesh(blocks, 1.0f, registry, VoxelMesher::NeighborBlocks());
+	CHECK(!voxel_surfaces.is_empty());
 }
 
 TEST_CASE("[VoxelWorld] Default content slice exposes restored forest beacon data") {

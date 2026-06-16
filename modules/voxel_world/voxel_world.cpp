@@ -10,7 +10,10 @@
 #include "core/os/os.h"
 #include "core/os/time.h"
 #include "core/string/print_string.h"
+#include "core/variant/typed_array.h"
 #include "scene/3d/camera_3d.h"
+#include "scene/3d/mesh_instance_3d.h"
+#include "scene/animation/animation_player.h"
 #include "scene/main/viewport.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -854,6 +857,14 @@ void VoxelWorld::_cleanup_world() {
 	}
 	block_lights.clear();
 
+	for (const KeyValue<Vector3i, Node3D *> &E : block_model_nodes) {
+		if (E.value->get_parent() == this) {
+			remove_child(E.value);
+		}
+		memdelete(E.value);
+	}
+	block_model_nodes.clear();
+
 	if (generator) {
 		memdelete(generator);
 		generator = nullptr;
@@ -1202,7 +1213,13 @@ Ref<ShaderMaterial> VoxelWorld::_get_voxel_shader_material(const Ref<Texture2D> 
 
 		Ref<ShaderMaterial> mat;
 		mat.instantiate();
+		if (mat.is_null()) {
+			return Ref<ShaderMaterial>();
+		}
 		mat->set_shader(voxel_shader);
+		if (mat->get_shader().is_null()) {
+			return Ref<ShaderMaterial>();
+		}
 		mat->set_shader_parameter("texture_albedo", p_texture);
 		mat->set_shader_parameter("use_texture", true);
 		voxel_textured_shader_material_cache[p_texture] = mat;
@@ -1211,7 +1228,14 @@ Ref<ShaderMaterial> VoxelWorld::_get_voxel_shader_material(const Ref<Texture2D> 
 
 	if (voxel_untextured_shader_material.is_null()) {
 		voxel_untextured_shader_material.instantiate();
+		if (voxel_untextured_shader_material.is_null()) {
+			return Ref<ShaderMaterial>();
+		}
 		voxel_untextured_shader_material->set_shader(voxel_shader);
+		if (voxel_untextured_shader_material->get_shader().is_null()) {
+			voxel_untextured_shader_material.unref();
+			return Ref<ShaderMaterial>();
+		}
 		voxel_untextured_shader_material->set_shader_parameter("use_texture", false);
 	}
 	return voxel_untextured_shader_material;
@@ -1256,21 +1280,27 @@ void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<Voxe
 	for (int s = 0; s < p_surfaces.size(); s++) {
 		uint64_t fmt_flags = p_surfaces[s].custom_format_flags;
 		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, p_surfaces[s].arrays, Array(), Dictionary(), fmt_flags);
+		Ref<Material> surface_material;
 		if (p_surfaces[s].shader_material.is_valid()) {
 			Ref<ShaderMaterial> mat = p_surfaces[s].shader_material;
-			if (p_surfaces[s].texture.is_valid() && mat->get_shader().is_valid()) {
+			if (p_surfaces[s].texture.is_valid() && mat.is_valid() && mat->get_shader().is_valid()) {
 				mat->set_shader_parameter("texture_albedo", p_surfaces[s].texture);
 			}
-			array_mesh->surface_set_material(s, mat);
+			surface_material = mat;
 		} else if (fmt_flags != 0 && voxel_shader.is_valid()) {
 			// Surface has CUSTOM0 light data — use voxel lighting shader.
-			array_mesh->surface_set_material(s, _get_voxel_shader_material(p_surfaces[s].texture));
-		} else if (p_surfaces[s].texture.is_valid()) {
+			surface_material = _get_voxel_shader_material(p_surfaces[s].texture);
+		}
+		if (surface_material.is_null() && p_surfaces[s].texture.is_valid()) {
 			int btype = p_surfaces[s].block_type;
 			bool alpha_scissor = btype >= 0 && block_registry.is_valid() && block_registry->is_uses_alpha(btype);
-			array_mesh->surface_set_material(s, _get_standard_texture_material(p_surfaces[s].texture, alpha_scissor));
-		} else if (material.is_valid()) {
-			array_mesh->surface_set_material(s, material);
+			surface_material = _get_standard_texture_material(p_surfaces[s].texture, alpha_scissor);
+		}
+		if (surface_material.is_null() && material.is_valid()) {
+			surface_material = material;
+		}
+		if (surface_material.is_valid()) {
+			array_mesh->surface_set_material(s, surface_material);
 		}
 	}
 
@@ -1333,6 +1363,201 @@ void VoxelWorld::_scan_chunk_for_lights(VoxelChunk *p_chunk) {
 				if (block_registry->get_emission(type) > 0) {
 					_spawn_block_light(Vector3i(base_bx + x, y, base_bz + z), type);
 				}
+			}
+		}
+	}
+}
+
+Node3D *VoxelWorld::_spawn_block_model(const Vector3i &p_block_pos, int p_type) {
+	if (block_model_nodes.has(p_block_pos) || block_registry.is_null()) {
+		return nullptr;
+	}
+
+	const VoxelBlockRegistry::VisualMode mode = block_registry->get_block_visual_mode(p_type);
+	if (mode == VoxelBlockRegistry::VISUAL_MODE_VOXEL) {
+		return nullptr;
+	}
+
+	Node3D *node = nullptr;
+	if (mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_MESH) {
+		Ref<Mesh> mesh = block_registry->get_block_model_mesh(p_type);
+		if (mesh.is_null()) {
+			return nullptr;
+		}
+		MeshInstance3D *mi = memnew(MeshInstance3D);
+		mi->set_mesh(mesh);
+		node = mi;
+	} else if (mode == VoxelBlockRegistry::VISUAL_MODE_MODEL_SCENE) {
+		Ref<PackedScene> scene = block_registry->get_block_model_scene(p_type);
+		if (scene.is_null() || !scene->can_instantiate()) {
+			return nullptr;
+		}
+		Node *instanced = scene->instantiate();
+		node = Object::cast_to<Node3D>(instanced);
+		if (node == nullptr) {
+			memdelete(instanced);
+			return nullptr;
+		}
+	}
+
+	if (node == nullptr) {
+		return nullptr;
+	}
+
+	node->set_position(block_to_world_pos(p_block_pos) + block_registry->get_block_model_offset(p_type));
+	node->set_rotation_degrees(Vector3(0, block_registry->get_block_model_rotation_y(p_type), 0));
+	node->set_scale(block_registry->get_block_model_scale(p_type));
+	add_child(node);
+	node->set_owner(nullptr);
+	block_model_nodes[p_block_pos] = node;
+	_play_block_model_animation(p_block_pos, p_type);
+	return node;
+}
+
+void VoxelWorld::_remove_block_model(const Vector3i &p_block_pos) {
+	Node3D **node_ptr = block_model_nodes.getptr(p_block_pos);
+	if (node_ptr == nullptr) {
+		return;
+	}
+	Node3D *node = *node_ptr;
+	if (node->get_parent() == this) {
+		remove_child(node);
+	}
+	memdelete(node);
+	block_model_nodes.erase(p_block_pos);
+}
+
+void VoxelWorld::_scan_chunk_for_block_models(VoxelChunk *p_chunk) {
+	if (p_chunk == nullptr || block_registry.is_null()) {
+		return;
+	}
+	const Vector<uint16_t> &blocks = p_chunk->get_blocks();
+	Vector2i cpos = p_chunk->get_chunk_pos();
+	const int base_bx = cpos.x * VoxelChunk::SIZE_X;
+	const int base_bz = cpos.y * VoxelChunk::SIZE_Z;
+	for (int y = 0; y < VoxelChunk::SIZE_Y; y++) {
+		for (int z = 0; z < VoxelChunk::SIZE_Z; z++) {
+			for (int x = 0; x < VoxelChunk::SIZE_X; x++) {
+				const int type = (int)blocks[VoxelTerrainGenerator::block_index(x, y, z)];
+				if (type != VOXEL_BLOCK_AIR && block_registry->get_block_visual_mode(type) != VoxelBlockRegistry::VISUAL_MODE_VOXEL) {
+					_spawn_block_model(Vector3i(base_bx + x, y, base_bz + z), type);
+				}
+			}
+		}
+	}
+}
+
+void VoxelWorld::_remove_block_models_in_chunk(const Vector2i &p_key) {
+	Vector<Vector3i> to_remove;
+	for (const KeyValue<Vector3i, Node3D *> &E : block_model_nodes) {
+		if (_block_to_chunk(E.key) == p_key) {
+			to_remove.push_back(E.key);
+		}
+	}
+	for (int i = 0; i < to_remove.size(); i++) {
+		_remove_block_model(to_remove[i]);
+	}
+}
+
+AnimationPlayer *VoxelWorld::_find_block_model_animation_player(Node *p_root) const {
+	if (p_root == nullptr) {
+		return nullptr;
+	}
+	AnimationPlayer *root_player = Object::cast_to<AnimationPlayer>(p_root);
+	if (root_player != nullptr) {
+		return root_player;
+	}
+	TypedArray<Node> players = p_root->find_children("*", "AnimationPlayer", true, false);
+	if (!players.is_empty()) {
+		return Object::cast_to<AnimationPlayer>(players[0]);
+	}
+	return nullptr;
+}
+
+StringName VoxelWorld::_select_block_model_animation(const Vector3i &p_block_pos, int p_type) const {
+	StringName key("idle");
+	const WorldObjectEntry *best_object = nullptr;
+	const Vector<int64_t> *same_chunk_ids = object_ids_by_chunk.getptr(_block_to_chunk(p_block_pos));
+	if (same_chunk_ids != nullptr) {
+		for (int i = 0; i < same_chunk_ids->size(); i++) {
+			const WorldObjectEntry *object = world_objects.getptr((*same_chunk_ids)[i]);
+			if (object != nullptr && object->block_pos == p_block_pos) {
+				best_object = object;
+				break;
+			}
+		}
+	}
+	if (best_object == nullptr) {
+		for (int dz = -1; dz <= 1 && best_object == nullptr; dz++) {
+			for (int dx = -1; dx <= 1 && best_object == nullptr; dx++) {
+				const Vector<int64_t> *ids = object_ids_by_chunk.getptr(_block_to_chunk(p_block_pos + Vector3i(dx, 0, dz)));
+				if (ids == nullptr) {
+					continue;
+				}
+				for (int i = 0; i < ids->size(); i++) {
+					const WorldObjectEntry *object = world_objects.getptr((*ids)[i]);
+					if (object == nullptr) {
+						continue;
+					}
+					const Vector3i delta = object->block_pos - p_block_pos;
+					if (Math::abs(delta.x) <= 1 && Math::abs(delta.y) <= 1 && Math::abs(delta.z) <= 1) {
+						best_object = object;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	if (best_object != nullptr) {
+		const Dictionary &state = best_object->state;
+		if (state.has("animation")) {
+			key = StringName(String(state["animation"]));
+		} else if (state.has("open")) {
+			key = (bool)state["open"] ? StringName("open") : StringName("idle");
+		} else if (state.has("active")) {
+			key = (bool)state["active"] ? StringName("active") : StringName("idle");
+		}
+	}
+
+	Dictionary map = block_registry->get_block_animation_state_map(p_type);
+	if (map.has(key)) {
+		return StringName(String(map[key]));
+	}
+	return key;
+}
+
+void VoxelWorld::_play_block_model_animation(const Vector3i &p_block_pos, int p_type) {
+	Node3D *const *node_ptr = block_model_nodes.getptr(p_block_pos);
+	if (node_ptr == nullptr) {
+		return;
+	}
+	AnimationPlayer *player = _find_block_model_animation_player(*node_ptr);
+	if (player == nullptr) {
+		return;
+	}
+	const StringName animation = _select_block_model_animation(p_block_pos, p_type);
+	if (animation != StringName() && player->has_animation(animation)) {
+		player->play(animation);
+	}
+}
+
+void VoxelWorld::_refresh_block_model_animation_at(const Vector3i &p_block_pos) {
+	Node3D *const *node_ptr = block_model_nodes.getptr(p_block_pos);
+	if (node_ptr == nullptr) {
+		return;
+	}
+	const int type = get_block_at(block_to_world_pos(p_block_pos));
+	if (type != VOXEL_BLOCK_AIR) {
+		_play_block_model_animation(p_block_pos, type);
+	}
+}
+
+void VoxelWorld::_refresh_block_model_animations_near_object(const WorldObjectEntry &p_object) {
+	for (int dz = -1; dz <= 1; dz++) {
+		for (int dy = -1; dy <= 1; dy++) {
+			for (int dx = -1; dx <= 1; dx++) {
+				_refresh_block_model_animation_at(p_object.block_pos + Vector3i(dx, dy, dz));
 			}
 		}
 	}
@@ -1534,6 +1759,7 @@ void VoxelWorld::_integrate_finished_chunks() {
 		if (!objects_loaded) {
 			_generate_structure_objects_for_chunk(result.key);
 		}
+		_scan_chunk_for_block_models(chunk);
 
 		// Spawn chunk border visualizer when enabled.
 		if (show_chunk_borders) {
@@ -1719,6 +1945,8 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 			}
 		}
 	}
+
+	_remove_block_models_in_chunk(key);
 
 	// Remove chunk border visualizer if enabled.
 	_despawn_chunk_border(key);
@@ -2049,6 +2277,7 @@ int64_t VoxelWorld::_add_world_object_internal(const WorldObjectEntry &p_object,
 	if (p_emit_signal) {
 		emit_signal("world_object_added", p_object.id, _world_object_to_dictionary(p_object));
 	}
+	_refresh_block_model_animations_near_object(p_object);
 	return p_object.id;
 }
 
@@ -2238,6 +2467,7 @@ bool VoxelWorld::set_world_object_state(int64_t p_id, const Dictionary &p_state)
 		dirty_saved_object_chunks.insert(_block_to_chunk(object->block_pos));
 	}
 	emit_signal("world_object_state_changed", p_id, p_state);
+	_refresh_block_model_animations_near_object(*object);
 	return true;
 }
 
@@ -2482,21 +2712,28 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 
 	int old_id = (int)chunk->get_block(local.x, local.y, local.z);
 	chunk->set_block(local.x, local.y, local.z, p_block_id);
+	Vector3i block_pos(
+			chunk_key.x * VoxelChunk::SIZE_X + local.x,
+			local.y,
+			chunk_key.y * VoxelChunk::SIZE_Z + local.z);
 	if (world_save_loaded && old_id != p_block_id) {
 		dirty_saved_chunks.insert(chunk_key);
 	}
 
 	// Manage OmniLight3D for emissive blocks (e.g. torches).
 	{
-		Vector3i light_pos(
-				chunk_key.x * VoxelChunk::SIZE_X + local.x,
-				local.y,
-				chunk_key.y * VoxelChunk::SIZE_Z + local.z);
 		if (block_registry->get_emission(old_id) > 0) {
-			_remove_block_light(light_pos);
+			_remove_block_light(block_pos);
 		}
 		if (block_registry->get_emission(p_block_id) > 0) {
-			_spawn_block_light(light_pos, p_block_id);
+			_spawn_block_light(block_pos, p_block_id);
+		}
+	}
+
+	if (old_id != p_block_id) {
+		_remove_block_model(block_pos);
+		if (p_block_id != VOXEL_BLOCK_AIR && block_registry->get_block_visual_mode(p_block_id) != VoxelBlockRegistry::VISUAL_MODE_VOXEL) {
+			_spawn_block_model(block_pos, p_block_id);
 		}
 	}
 
@@ -2516,8 +2753,6 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 	if (local.z == VoxelChunk::SIZE_Z - 1) {
 		_request_remesh(Vector2i(chunk_key.x, chunk_key.y + 1));
 	}
-
-	Vector3i block_pos = world_to_block_pos(p_world_pos);
 
 	if (p_block_id == 0 && old_id != 0) {
 		emit_signal("block_broken", block_pos, old_id);

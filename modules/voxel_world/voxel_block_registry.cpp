@@ -48,6 +48,32 @@ String VoxelBlockRegistry::shape_to_string(BlockShape p_shape) {
 	}
 }
 
+VoxelBlockRegistry::VisualMode VoxelBlockRegistry::visual_mode_from_variant(const Variant &p_value) {
+	if (p_value.get_type() == Variant::STRING || p_value.get_type() == Variant::STRING_NAME) {
+		const String value = String(p_value).to_lower();
+		if (value == "model_mesh") {
+			return VISUAL_MODE_MODEL_MESH;
+		}
+		if (value == "model_scene") {
+			return VISUAL_MODE_MODEL_SCENE;
+		}
+		return VISUAL_MODE_VOXEL;
+	}
+	const int mode = CLAMP((int)p_value, 0, VISUAL_MODE_MAX - 1);
+	return (VisualMode)mode;
+}
+
+String VoxelBlockRegistry::visual_mode_to_string(VisualMode p_mode) {
+	switch (p_mode) {
+		case VISUAL_MODE_MODEL_MESH:
+			return "model_mesh";
+		case VISUAL_MODE_MODEL_SCENE:
+			return "model_scene";
+		default:
+			return "voxel";
+	}
+}
+
 static PackedStringArray _packed_strings_from_variant(const Variant &p_value) {
 	if (p_value.get_type() == Variant::PACKED_STRING_ARRAY) {
 		return p_value;
@@ -88,6 +114,27 @@ static void _apply_block_properties(VoxelBlockRegistry::BlockEntry &r_entry, con
 	}
 	if (p_properties.has("shape")) {
 		r_entry.shape = VoxelBlockRegistry::shape_from_variant(p_properties["shape"]);
+	}
+	if (p_properties.has("visual_mode")) {
+		r_entry.visual_mode = VoxelBlockRegistry::visual_mode_from_variant(p_properties["visual_mode"]);
+	}
+	if (p_properties.has("model_mesh")) {
+		r_entry.model_mesh = p_properties["model_mesh"];
+	}
+	if (p_properties.has("model_scene")) {
+		r_entry.model_scene = p_properties["model_scene"];
+	}
+	if (p_properties.has("model_offset")) {
+		r_entry.model_offset = p_properties["model_offset"];
+	}
+	if (p_properties.has("model_rotation_y")) {
+		r_entry.model_rotation_y = p_properties["model_rotation_y"];
+	}
+	if (p_properties.has("model_scale")) {
+		r_entry.model_scale = p_properties["model_scale"];
+	}
+	if (p_properties.has("animation_state_map")) {
+		r_entry.animation_state_map = p_properties["animation_state_map"];
 	}
 	if (p_properties.has("mesh_height")) {
 		r_entry.mesh_height = CLAMP((float)p_properties["mesh_height"], 0.0f, 1.0f);
@@ -176,6 +223,7 @@ void VoxelBlockRegistry::_build_cache() {
 	cache_light_opacity.resize(count);
 	cache_light_color.resize(count);
 	cache_shape.resize(count);
+	cache_visual_mode.resize(count);
 	cache_is_fluid.resize(count);
 	cache_replaceable.resize(count);
 
@@ -189,6 +237,7 @@ void VoxelBlockRegistry::_build_cache() {
 		cache_light_opacity.write[i] = e.light_opacity;
 		cache_light_color.write[i] = e.light_color;
 		cache_shape.write[i] = (uint8_t)e.shape;
+		cache_visual_mode.write[i] = (uint8_t)e.visual_mode;
 		cache_is_fluid.write[i] = e.is_fluid;
 		cache_replaceable.write[i] = e.replaceable;
 	}
@@ -257,6 +306,20 @@ bool VoxelBlockRegistry::_set(const StringName &p_name, const Variant &p_value) 
 		set_block_shader_material(idx, p_value);
 	} else if (what == "shape") {
 		set_block_shape(idx, shape_from_variant(p_value));
+	} else if (what == "visual_mode") {
+		set_block_visual_mode(idx, visual_mode_from_variant(p_value));
+	} else if (what == "model_mesh") {
+		set_block_model_mesh(idx, p_value);
+	} else if (what == "model_scene") {
+		set_block_model_scene(idx, p_value);
+	} else if (what == "model_offset") {
+		set_block_model_offset(idx, p_value);
+	} else if (what == "model_rotation_y") {
+		set_block_model_rotation_y(idx, p_value);
+	} else if (what == "model_scale") {
+		set_block_model_scale(idx, p_value);
+	} else if (what == "animation_state_map") {
+		set_block_animation_state_map(idx, p_value);
 	} else if (what == "mesh_height") {
 		set_block_mesh_height(idx, p_value);
 	} else if (what == "collision_height") {
@@ -342,6 +405,20 @@ bool VoxelBlockRegistry::_get(const StringName &p_name, Variant &r_ret) const {
 		r_ret = get_block_shader_material(idx);
 	} else if (what == "shape") {
 		r_ret = shape_to_string(get_block_shape(idx));
+	} else if (what == "visual_mode") {
+		r_ret = visual_mode_to_string(get_block_visual_mode(idx));
+	} else if (what == "model_mesh") {
+		r_ret = get_block_model_mesh(idx);
+	} else if (what == "model_scene") {
+		r_ret = get_block_model_scene(idx);
+	} else if (what == "model_offset") {
+		r_ret = get_block_model_offset(idx);
+	} else if (what == "model_rotation_y") {
+		r_ret = get_block_model_rotation_y(idx);
+	} else if (what == "model_scale") {
+		r_ret = get_block_model_scale(idx);
+	} else if (what == "animation_state_map") {
+		r_ret = get_block_animation_state_map(idx);
 	} else if (what == "mesh_height") {
 		r_ret = get_block_mesh_height(idx);
 	} else if (what == "collision_height") {
@@ -418,6 +495,13 @@ void VoxelBlockRegistry::_get_property_list(List<PropertyInfo> *p_list) const {
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "texture_bottom", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"));
 		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "shader_material", PROPERTY_HINT_RESOURCE_TYPE, "ShaderMaterial"));
 		p_list->push_back(PropertyInfo(Variant::STRING, prefix + "shape", PROPERTY_HINT_ENUM, "cube,low_cube,cross_plant,pane,fence,ladder"));
+		p_list->push_back(PropertyInfo(Variant::STRING, prefix + "visual_mode", PROPERTY_HINT_ENUM, "voxel,model_mesh,model_scene"));
+		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "model_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"));
+		p_list->push_back(PropertyInfo(Variant::OBJECT, prefix + "model_scene", PROPERTY_HINT_RESOURCE_TYPE, "PackedScene"));
+		p_list->push_back(PropertyInfo(Variant::VECTOR3, prefix + "model_offset"));
+		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "model_rotation_y", PROPERTY_HINT_RANGE, "-360.0,360.0,0.1,degrees"));
+		p_list->push_back(PropertyInfo(Variant::VECTOR3, prefix + "model_scale"));
+		p_list->push_back(PropertyInfo(Variant::DICTIONARY, prefix + "animation_state_map"));
 		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "mesh_height", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"));
 		p_list->push_back(PropertyInfo(Variant::FLOAT, prefix + "collision_height", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"));
 		p_list->push_back(PropertyInfo(Variant::PACKED_STRING_ARRAY, prefix + "tags"));
@@ -480,6 +564,22 @@ void VoxelBlockRegistry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_block_shape", "id", "shape"), &VoxelBlockRegistry::set_block_shape);
 	ClassDB::bind_method(D_METHOD("get_block_shape", "id"), &VoxelBlockRegistry::get_block_shape);
 
+	ClassDB::bind_method(D_METHOD("set_block_visual_mode", "id", "mode"), &VoxelBlockRegistry::set_block_visual_mode);
+	ClassDB::bind_method(D_METHOD("get_block_visual_mode", "id"), &VoxelBlockRegistry::get_block_visual_mode);
+	ClassDB::bind_method(D_METHOD("block_has_model_visual", "id"), &VoxelBlockRegistry::block_has_model_visual);
+	ClassDB::bind_method(D_METHOD("set_block_model_mesh", "id", "mesh"), &VoxelBlockRegistry::set_block_model_mesh);
+	ClassDB::bind_method(D_METHOD("get_block_model_mesh", "id"), &VoxelBlockRegistry::get_block_model_mesh);
+	ClassDB::bind_method(D_METHOD("set_block_model_scene", "id", "scene"), &VoxelBlockRegistry::set_block_model_scene);
+	ClassDB::bind_method(D_METHOD("get_block_model_scene", "id"), &VoxelBlockRegistry::get_block_model_scene);
+	ClassDB::bind_method(D_METHOD("set_block_model_offset", "id", "offset"), &VoxelBlockRegistry::set_block_model_offset);
+	ClassDB::bind_method(D_METHOD("get_block_model_offset", "id"), &VoxelBlockRegistry::get_block_model_offset);
+	ClassDB::bind_method(D_METHOD("set_block_model_rotation_y", "id", "degrees"), &VoxelBlockRegistry::set_block_model_rotation_y);
+	ClassDB::bind_method(D_METHOD("get_block_model_rotation_y", "id"), &VoxelBlockRegistry::get_block_model_rotation_y);
+	ClassDB::bind_method(D_METHOD("set_block_model_scale", "id", "scale"), &VoxelBlockRegistry::set_block_model_scale);
+	ClassDB::bind_method(D_METHOD("get_block_model_scale", "id"), &VoxelBlockRegistry::get_block_model_scale);
+	ClassDB::bind_method(D_METHOD("set_block_animation_state_map", "id", "state_map"), &VoxelBlockRegistry::set_block_animation_state_map);
+	ClassDB::bind_method(D_METHOD("get_block_animation_state_map", "id"), &VoxelBlockRegistry::get_block_animation_state_map);
+
 	ClassDB::bind_method(D_METHOD("set_block_mesh_height", "id", "height"), &VoxelBlockRegistry::set_block_mesh_height);
 	ClassDB::bind_method(D_METHOD("get_block_mesh_height", "id"), &VoxelBlockRegistry::get_block_mesh_height);
 	ClassDB::bind_method(D_METHOD("set_block_collision_height", "id", "height"), &VoxelBlockRegistry::set_block_collision_height);
@@ -538,6 +638,10 @@ void VoxelBlockRegistry::_bind_methods() {
 	BIND_ENUM_CONSTANT(BLOCK_SHAPE_PANE);
 	BIND_ENUM_CONSTANT(BLOCK_SHAPE_FENCE);
 	BIND_ENUM_CONSTANT(BLOCK_SHAPE_LADDER);
+
+	BIND_ENUM_CONSTANT(VISUAL_MODE_VOXEL);
+	BIND_ENUM_CONSTANT(VISUAL_MODE_MODEL_MESH);
+	BIND_ENUM_CONSTANT(VISUAL_MODE_MODEL_SCENE);
 }
 
 // --- Per-property implementations ---
@@ -618,6 +722,82 @@ void VoxelBlockRegistry::set_block_shape(int p_id, BlockShape p_shape) {
 VoxelBlockRegistry::BlockShape VoxelBlockRegistry::get_block_shape(int p_id) const {
 	REGISTRY_ENSURE_BLOCK_V(p_id, BLOCK_SHAPE_CUBE);
 	return blocks[p_id].shape;
+}
+
+void VoxelBlockRegistry::set_block_visual_mode(int p_id, VisualMode p_mode) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].visual_mode = (VisualMode)CLAMP((int)p_mode, 0, VISUAL_MODE_MAX - 1);
+	emit_changed();
+}
+VoxelBlockRegistry::VisualMode VoxelBlockRegistry::get_block_visual_mode(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, VISUAL_MODE_VOXEL);
+	return blocks[p_id].visual_mode;
+}
+bool VoxelBlockRegistry::block_has_model_visual(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, false);
+	const BlockEntry &entry = blocks[p_id];
+	return (entry.visual_mode == VISUAL_MODE_MODEL_MESH && entry.model_mesh.is_valid()) ||
+			(entry.visual_mode == VISUAL_MODE_MODEL_SCENE && entry.model_scene.is_valid());
+}
+
+void VoxelBlockRegistry::set_block_model_mesh(int p_id, const Ref<Mesh> &p_mesh) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].model_mesh = p_mesh;
+	emit_changed();
+}
+Ref<Mesh> VoxelBlockRegistry::get_block_model_mesh(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, Ref<Mesh>());
+	return blocks[p_id].model_mesh;
+}
+
+void VoxelBlockRegistry::set_block_model_scene(int p_id, const Ref<PackedScene> &p_scene) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].model_scene = p_scene;
+	emit_changed();
+}
+Ref<PackedScene> VoxelBlockRegistry::get_block_model_scene(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, Ref<PackedScene>());
+	return blocks[p_id].model_scene;
+}
+
+void VoxelBlockRegistry::set_block_model_offset(int p_id, const Vector3 &p_offset) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].model_offset = p_offset;
+	emit_changed();
+}
+Vector3 VoxelBlockRegistry::get_block_model_offset(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, Vector3());
+	return blocks[p_id].model_offset;
+}
+
+void VoxelBlockRegistry::set_block_model_rotation_y(int p_id, float p_degrees) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].model_rotation_y = p_degrees;
+	emit_changed();
+}
+float VoxelBlockRegistry::get_block_model_rotation_y(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, 0.0f);
+	return blocks[p_id].model_rotation_y;
+}
+
+void VoxelBlockRegistry::set_block_model_scale(int p_id, const Vector3 &p_scale) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].model_scale = p_scale;
+	emit_changed();
+}
+Vector3 VoxelBlockRegistry::get_block_model_scale(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, Vector3(1, 1, 1));
+	return blocks[p_id].model_scale;
+}
+
+void VoxelBlockRegistry::set_block_animation_state_map(int p_id, const Dictionary &p_map) {
+	REGISTRY_ENSURE_BLOCK(p_id);
+	blocks.write[p_id].animation_state_map = p_map;
+	emit_changed();
+}
+Dictionary VoxelBlockRegistry::get_block_animation_state_map(int p_id) const {
+	REGISTRY_ENSURE_BLOCK_V(p_id, Dictionary());
+	return blocks[p_id].animation_state_map;
 }
 
 void VoxelBlockRegistry::set_block_mesh_height(int p_id, float p_height) {
@@ -872,6 +1052,27 @@ void VoxelBlockRegistry::setup_defaults() {
 		}
 		if (p_props.has("shape") && entry.shape == BLOCK_SHAPE_CUBE) {
 			entry.shape = shape_from_variant(p_props["shape"]);
+		}
+		if (p_props.has("visual_mode") && entry.visual_mode == VISUAL_MODE_VOXEL) {
+			entry.visual_mode = visual_mode_from_variant(p_props["visual_mode"]);
+		}
+		if (p_props.has("model_mesh") && entry.model_mesh.is_null()) {
+			entry.model_mesh = p_props["model_mesh"];
+		}
+		if (p_props.has("model_scene") && entry.model_scene.is_null()) {
+			entry.model_scene = p_props["model_scene"];
+		}
+		if (p_props.has("model_offset") && entry.model_offset == Vector3()) {
+			entry.model_offset = p_props["model_offset"];
+		}
+		if (p_props.has("model_rotation_y") && entry.model_rotation_y == 0.0f) {
+			entry.model_rotation_y = p_props["model_rotation_y"];
+		}
+		if (p_props.has("model_scale") && entry.model_scale == Vector3(1, 1, 1)) {
+			entry.model_scale = p_props["model_scale"];
+		}
+		if (p_props.has("animation_state_map") && entry.animation_state_map.is_empty()) {
+			entry.animation_state_map = p_props["animation_state_map"];
 		}
 		// Only apply mesh_height/collision_height/uses_alpha if still at BlockEntry defaults.
 		if (p_props.has("mesh_height") && entry.mesh_height == 1.0f) {

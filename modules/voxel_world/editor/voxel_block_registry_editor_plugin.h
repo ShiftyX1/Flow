@@ -5,6 +5,7 @@
 #include "scene/gui/box_container.h"
 #include "scene/gui/dialogs.h"
 #include "scene/gui/line_edit.h"
+#include "scene/gui/option_button.h"
 #include "scene/gui/scroll_container.h"
 
 #include "../voxel_block_registry.h"
@@ -17,7 +18,7 @@ class CheckBox;
 class SpinBox;
 class ColorPickerButton;
 
-// Popup dialog with the full block texture editor.
+// Popup dialog with the full block visual editor.
 class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 	GDCLASS(VoxelBlockRegistryEditorDialog, AcceptDialog);
 
@@ -32,6 +33,16 @@ class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 		EditorResourcePicker *picker_side = nullptr;
 		EditorResourcePicker *picker_bottom = nullptr;
 		EditorResourcePicker *picker_shader = nullptr;
+		// Model visual controls.
+		OptionButton *option_visual_mode = nullptr;
+		EditorResourcePicker *picker_model_mesh = nullptr;
+		EditorResourcePicker *picker_model_scene = nullptr;
+		SpinBox *spin_model_offset[3] = { nullptr, nullptr, nullptr };
+		SpinBox *spin_model_rotation_y = nullptr;
+		SpinBox *spin_model_scale[3] = { nullptr, nullptr, nullptr };
+		LineEdit *edit_animation_idle = nullptr;
+		LineEdit *edit_animation_active = nullptr;
+		LineEdit *edit_animation_open = nullptr;
 		// Physics & lighting controls.
 		CheckBox *check_solid = nullptr;
 		CheckBox *check_transparent = nullptr;
@@ -48,8 +59,18 @@ class VoxelBlockRegistryEditorDialog : public AcceptDialog {
 	Vector<BlockRow> block_rows;
 
 	void _rebuild_block_list();
+	BlockRow *_find_block_row(int p_block_id);
+	void _update_visual_controls_enabled(int p_block_id);
 	void _texture_changed(const Ref<Resource> &p_resource, int p_block_id, int p_face);
 	void _shader_changed(const Ref<Resource> &p_resource, int p_block_id);
+	void _visual_mode_selected(int p_index, int p_block_id);
+	void _model_mesh_changed(const Ref<Resource> &p_resource, int p_block_id);
+	void _model_scene_changed(const Ref<Resource> &p_resource, int p_block_id);
+	void _model_offset_axis_changed(double p_value, int p_block_id, int p_axis);
+	void _model_rotation_y_changed(double p_value, int p_block_id);
+	void _model_scale_axis_changed(double p_value, int p_block_id, int p_axis);
+	void _animation_state_submitted(const String &p_text, int p_block_id, const StringName &p_key);
+	void _animation_state_focus_exited(LineEdit *p_line_edit, int p_block_id, const StringName &p_key);
 	void _solid_toggled(bool p_pressed, int p_block_id);
 	void _transparent_toggled(bool p_pressed, int p_block_id);
 	void _color_changed(const Color &p_color, int p_block_id);
@@ -71,7 +92,7 @@ public:
 	VoxelBlockRegistryEditorDialog();
 };
 
-// Small widget in the inspector: shows summary + "Edit Textures" button.
+// Small widget in the inspector: shows summary + visual editor button.
 class VoxelBlockRegistryInspectorButton : public VBoxContainer {
 	GDCLASS(VoxelBlockRegistryInspectorButton, VBoxContainer);
 

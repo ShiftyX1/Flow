@@ -7995,7 +7995,11 @@ void RenderingDevice::capture_timestamp(const String &p_name) {
 	ERR_FAIL_COND_MSG(draw_list.active && draw_list.state.draw_count > 0, "Capturing timestamps during draw list creation is not allowed. Offending timestamp was: " + p_name);
 	ERR_FAIL_COND_MSG(compute_list.active && compute_list.state.dispatch_count > 0, "Capturing timestamps during compute list creation is not allowed. Offending timestamp was: " + p_name);
 	ERR_FAIL_COND_MSG(raytracing_list.active && raytracing_list.state.trace_count > 0, "Capturing timestamps during raytracing list creation is not allowed. Offending timestamp was: " + p_name);
-	ERR_FAIL_COND_MSG(frames[frame].timestamp_count >= max_timestamp_query_elements, vformat("Tried capturing more timestamps than the configured maximum (%d). You can increase this limit in the project settings under 'Debug/Settings' called 'Max Timestamp Query Elements'.", max_timestamp_query_elements));
+	// TODO: LOOOOL WHAT THE FUCK IS THIS, I SHOULD K1LL MYSELF NOW AJAJAJAJ 
+	if (frames[frame].timestamp_count >= max_timestamp_query_elements) {
+		WARN_PRINT_ONCE(vformat("Ignoring extra timestamp capture. You may increase 'Max Timestamp Query Elements' in project settings under 'Debug/Settings'. Current limit: %d. Total captures this frame: %d.", max_timestamp_query_elements, frames[frame].timestamp_count + 1));
+		return;
+	}
 
 	draw_graph.add_capture_timestamp(frames[frame].timestamp_pool, frames[frame].timestamp_count);
 

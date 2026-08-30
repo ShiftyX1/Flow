@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DragOperation" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		CEF drag operation constants.
+	</brief_description>
+	<description>
+		Constants used by CefTexture drag signals.
+	</description>
+	<constants>
+		<constant name="NONE" value="0">
+			No drag operation.
+		</constant>
+		<constant name="COPY" value="1">
+			Copy the dragged data.
+		</constant>
+		<constant name="LINK" value="2">
+			Create a link to the dragged data.
+		</constant>
+		<constant name="MOVE" value="16">
+			Move the dragged data.
+		</constant>
+		<constant name="EVERY" value="2147483647">
+			All drag operations are allowed.
+		</constant>
+	</constants>
+</class>

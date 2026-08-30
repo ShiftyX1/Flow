@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MultiplayerSimulationClock" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Maintains simulation and delayed presentation timelines for multiplayer games.
+	</brief_description>
+	<description>
+		[MultiplayerSimulationClock] tracks a local fixed-rate simulation clock and the newest observed server tick. When a server tick is observed, the presentation timeline starts [member interpolation_delay_ticks] behind it and advances continuously until the next server tick is received. Repeated or stale server ticks do not reset the current presentation phase.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="advance">
+			<return type="int" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Advances the local clock and the presentation phase by [param delta] seconds. Returns the number of complete local simulation ticks advanced.
+			</description>
+		</method>
+		<method name="get_local_tick" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the current local simulation tick.
+			</description>
+		</method>
+		<method name="get_observed_server_tick" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the newest observed server tick, or [code]-1[/code] before a server tick is observed.
+			</description>
+		</method>
+		<method name="get_render_fraction" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the fractional progress from [method get_render_tick] toward the following tick.
+			</description>
+		</method>
+		<method name="get_render_tick" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the integral delayed presentation tick.
+			</description>
+		</method>
+		<method name="get_render_tick_time" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the delayed presentation time in ticks, including the current fractional phase.
+			</description>
+		</method>
+		<method name="get_tick_delta" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the duration of one simulation tick in seconds.
+			</description>
+		</method>
+		<method name="observe_server_tick">
+			<return type="void" />
+			<param index="0" name="tick" type="int" />
+			<description>
+				Observes a server tick. Only ticks newer than the current observation re-anchor the presentation phase.
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Clears the local clock, server observation, and presentation phase.
+			</description>
+		</method>
+		<method name="set_local_tick">
+			<return type="void" />
+			<param index="0" name="tick" type="int" />
+			<description>
+				Sets the local simulation tick and clears its fractional accumulator.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="interpolation_delay_ticks" type="int" setter="set_interpolation_delay_ticks" getter="get_interpolation_delay_ticks" default="2">
+			Number of ticks by which presentation trails the latest observed server tick.
+		</member>
+		<member name="tick_rate" type="int" setter="set_tick_rate" getter="get_tick_rate" default="30">
+			Simulation ticks per second.
+		</member>
+	</members>
+</class>

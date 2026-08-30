@@ -1,0 +1,925 @@
+pub(crate) mod backend;
+mod browser_lifecycle;
+mod cookie_ops;
+mod ime;
+mod permission_ops;
+mod rendering;
+mod signals;
+
+use cef::{self, ImplBrowserHost, ImplDragData, do_message_loop_work};
+use godot::classes::notify::ControlNotification;
+use godot::classes::texture_rect::ExpandMode;
+use godot::classes::{
+    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, InputEventKey,
+    InputEventMagnifyGesture, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
+    InputEventScreenDrag, InputEventScreenTouch, LineEdit, TextureRect,
+};
+use godot::prelude::*;
+
+use crate::cef_texture2d::CefTexture2D;
+use crate::{cef_init, input};
+
+#[derive(GodotClass)]
+#[class(base=TextureRect)]
+pub struct CefTexture {
+    base: Base<TextureRect>,
+
+    #[export]
+    #[var(get = get_url_property, set = set_url_property)]
+    /// The URL to load. Changing this triggers a navigation.
+    /// Supported schemes: http://, https://, res://, user://
+    url: GString,
+
+    #[export]
+    #[var(get = get_enable_accelerated_osr, set = set_enable_accelerated_osr)]
+    /// Enable GPU-accelerated Off-Screen Rendering (OSR).
+    /// If true, uses shared textures (Vulkan/D3D12/Metal) for high performance.
+    /// If false or unsupported, falls back to software rendering.
+    enable_accelerated_osr: bool,
+
+    #[export]
+    #[var(get = get_background_color, set = set_background_color)]
+    /// The background color of the browser view.
+    /// Useful for transparent pages.
+    background_color: Color,
+
+    #[export(enum = (Block = 0, Redirect = 1, SignalOnly = 2))]
+    #[var(get = get_popup_policy, set = set_popup_policy)]
+    /// Controls how popup windows (window.open, target="_blank") are handled.
+    /// Block: suppress all popups silently (default).
+    /// Redirect: navigate the current browser to the popup URL.
+    /// SignalOnly: emit `popup_requested` signal and let GDScript decide.
+    popup_policy: i32,
+
+    #[export]
+    #[var(get = get_preload_script, set = set_preload_script)]
+    /// JavaScript source to inject into the main frame when its V8 context is created.
+    preload_script: GString,
+
+    #[export]
+    #[var(get = get_preload_script_path, set = set_preload_script_path)]
+    /// Godot file path containing JavaScript to inject as a preload script.
+    preload_script_path: GString,
+
+    #[var]
+    /// Stores the IME cursor position in local coordinates (relative to this `CefTexture` node),
+    /// automatically updated from the browser's caret position.
+    ime_position: Vector2i,
+
+    // Internal CefTexture2D helper for shared settings behavior.
+    texture2d_helper: Gd<CefTexture2D>,
+    // Change detection state
+    last_size: Vector2,
+    last_dpi: f32,
+    // UI-only change detection state
+    last_cursor: cef_app::CursorType,
+    last_max_fps: i32,
+    browser_create_deferred_pending: bool,
+
+    // IME state
+    ime_active: bool,
+    ime_proxy: Option<Gd<LineEdit>>,
+    ime_focus_regrab_pending: bool,
+
+    // Popup state
+    popup_overlay: Option<Gd<TextureRect>>,
+    popup_texture: Option<Gd<ImageTexture>>,
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    popup_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
+    // Touch state
+
+    // Find-in-page state
+}
+
+#[godot_api]
+impl ITextureRect for CefTexture {
+    fn init(base: Base<TextureRect>) -> Self {
+        let mut texture2d_helper = CefTexture2D::new_gd();
+        // Runtime App state lives inside texture2d_helper; CefTexture owns its lifecycle and ticking,
+        // so ensure any existing runtime in the helper is shut down before this instance takes over.
+        texture2d_helper.bind_mut().shutdown();
+
+        Self {
+            base,
+            url: "https://google.com".into(),
+            enable_accelerated_osr: true,
+            background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+            popup_policy: crate::browser::popup_policy::BLOCK,
+            preload_script: GString::new(),
+            preload_script_path: GString::new(),
+            ime_position: Vector2i::new(0, 0),
+            texture2d_helper,
+            last_size: Vector2::ZERO,
+            last_dpi: 1.0,
+            last_cursor: cef_app::CursorType::Arrow,
+            last_max_fps: 0,
+            browser_create_deferred_pending: false,
+            ime_active: false,
+            ime_proxy: None,
+            ime_focus_regrab_pending: false,
+            popup_overlay: None,
+            popup_texture: None,
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            popup_texture_2d_rd: None,
+        }
+    }
+
+    fn on_notification(&mut self, what: ControlNotification) {
+        match what {
+            ControlNotification::READY => {
+                self.on_ready();
+            }
+            ControlNotification::PROCESS => {
+                self.on_process();
+            }
+            ControlNotification::RESIZED => {
+                // React immediately to control size changes so CEF receives
+                // resize notifications even if process timing is delayed.
+                let _ = self.handle_size_change();
+                self.update_texture();
+            }
+            ControlNotification::PREDELETE => {
+                self.cleanup_instance();
+            }
+            ControlNotification::FOCUS_ENTER => {
+                if let Some(host) = self.with_app(|app| app.host()) {
+                    host.set_focus(true as _);
+                }
+            }
+            ControlNotification::FOCUS_EXIT => {
+                if let Some(host) = self.with_app(|app| app.host()) {
+                    host.set_focus(false as _);
+                }
+            }
+            ControlNotification::OS_IME_UPDATE => {
+                self.handle_os_ime_update();
+            }
+            _ => {}
+        }
+    }
+
+    fn input(&mut self, event: Gd<InputEvent>) {
+        self.handle_input_event(event);
+    }
+}
+
+#[godot_api]
+impl CefTexture {
+    fn with_app<R>(&self, f: impl FnOnce(&crate::browser::App) -> R) -> R {
+        let helper = self.texture2d_helper.bind();
+        f(helper.runtime_app())
+    }
+
+    fn with_app_mut<R>(&mut self, f: impl FnOnce(&mut crate::browser::App) -> R) -> R {
+        let mut helper = self.texture2d_helper.bind_mut();
+        f(helper.runtime_app_mut())
+    }
+
+    fn event_position_to_local(&self, position: Vector2) -> Vector2 {
+        // `input()` delivers positions in viewport space for this node path, while
+        // CEF expects view-local coordinates relative to the browser texture.
+        position - self.base().get_global_position()
+    }
+
+    fn make_browser_material() -> Gd<godot::classes::Material> {
+        let mut material = CanvasItemMaterial::new_gd();
+        material.set_blend_mode(godot::classes::canvas_item_material::BlendMode::PREMULT_ALPHA);
+        material.upcast()
+    }
+
+    #[signal]
+    fn ipc_message(message: GString);
+
+    #[signal]
+    fn ipc_binary_message(data: PackedByteArray);
+
+    #[signal]
+    fn ipc_data_message(data: Variant);
+
+    #[signal]
+    fn debug_ipc_message(event: Variant);
+
+    #[signal]
+    fn url_changed(url: GString);
+
+    #[signal]
+    fn title_changed(title: GString);
+
+    #[signal]
+    fn load_started(url: GString);
+
+    #[signal]
+    fn load_finished(url: GString, http_status_code: i32);
+
+    #[signal]
+    fn load_error(url: GString, error_code: i32, error_text: GString);
+
+    #[signal]
+    fn console_message(level: u32, message: GString, source: GString, line: i32);
+
+    #[signal]
+    fn drag_started(drag_data: Gd<crate::drag::DragDataInfo>, position: Vector2, allowed_ops: i32);
+
+    #[signal]
+    fn drag_cursor_updated(operation: i32);
+
+    #[signal]
+    fn drag_entered(drag_data: Gd<crate::drag::DragDataInfo>, mask: i32);
+
+    #[signal]
+    fn download_requested(download_info: Gd<crate::cef_texture::signals::DownloadRequestInfo>);
+
+    #[signal]
+    fn download_updated(download_info: Gd<crate::cef_texture::signals::DownloadUpdateInfo>);
+
+    #[signal]
+    fn render_process_terminated(status: i32, error_message: GString);
+
+    #[signal]
+    fn popup_requested(url: GString, disposition: i32, user_gesture: bool);
+
+    #[signal]
+    fn permission_requested(permission_type: GString, url: GString, request_id: i64);
+
+    /// Emitted after a find-in-page operation completes or is updated.
+    ///
+    /// - `count` is the total number of matches found.
+    /// - `active_index` corresponds to CEF's `active_match_ordinal` and is **1-based**.
+    ///   A value of `0` means there is no active match.
+    #[signal]
+    fn find_result(count: i32, active_index: i32, final_update: bool);
+
+    /// Emitted when `get_cookies` or `get_all_cookies` completes.
+    /// Contains an `Array` of `CookieInfo` objects.
+    #[signal]
+    fn cookies_received(cookies: Array<Gd<crate::cef_texture::signals::CookieInfo>>);
+
+    /// Emitted when `set_cookie` completes.
+    #[signal]
+    fn cookie_set(success: bool);
+
+    /// Emitted when `delete_cookies` or `clear_cookies` completes.
+    #[signal]
+    fn cookies_deleted(num_deleted: i32);
+
+    /// Emitted when `flush_cookies` completes.
+    #[signal]
+    fn cookies_flushed();
+
+    #[func]
+    fn on_ready(&mut self) {
+        use godot::classes::control::FocusMode;
+        if let Err(e) = cef_init::cef_retain() {
+            godot::global::godot_error!("[CefTexture] {}", e);
+            return;
+        }
+        self.with_app_mut(|app| app.mark_cef_retained());
+
+        self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
+        self.base_mut().set_material(&Self::make_browser_material());
+        // Must explicitly enable processing when using on_notification instead of fn process()
+        self.base_mut().set_process(true);
+        // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF.
+        self.base_mut().set_focus_mode(FocusMode::CLICK);
+
+        // Create hidden LineEdit for IME proxy
+        self.create_ime_proxy();
+
+        // Never create the browser inside READY notification. CEF context/browser
+        // creation can synchronously trigger callbacks, causing re-entrant mutable
+        // borrows while Godot is still inside `on_notification`.
+        // Browser creation is handled in `on_process()` once notification returns.
+    }
+
+    #[func]
+    fn on_process(&mut self) {
+        // Lazy browser creation: if browser doesn't exist yet (e.g., size was 0 in on_ready
+        // because we're inside a Container), try to create it now that layout may be complete.
+        if self.with_app(|app| app.state.is_none() && app.can_create_browser()) {
+            let size = self.base().get_size();
+            if size.x > 0.0 && size.y > 0.0 && !self.browser_create_deferred_pending {
+                self.browser_create_deferred_pending = true;
+                self.base_mut().set_process(false);
+                self.base_mut()
+                    .call_deferred("_deferred_create_browser", &[]);
+            }
+        }
+
+        self.handle_max_fps_change();
+        _ = self.handle_size_change();
+        self.update_texture();
+
+        if self.with_app(|app| app.state.is_some()) {
+            do_message_loop_work();
+        }
+
+        self.request_external_begin_frame();
+        self.update_cursor();
+
+        // Process all event queues with a single lock (more efficient than per-queue locks)
+        self.process_all_event_queues();
+    }
+
+    #[func]
+    fn _deferred_create_browser(&mut self) {
+        self.browser_create_deferred_pending = false;
+        if self.with_app(|app| app.state.is_none()) {
+            self.create_browser();
+        }
+        self.base_mut().set_process(true);
+    }
+
+    fn handle_input_event(&mut self, event: Gd<InputEvent>) {
+        let pixel_scale = self.get_pixel_scale_factor();
+        let device_scale = self.get_device_scale_factor();
+
+        if let Ok(mut mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
+            let local_position = self.event_position_to_local(mouse_button.get_position());
+            mouse_button.set_position(local_position);
+            self.texture2d_helper.bind().forward_mouse_button_event(
+                mouse_button,
+                pixel_scale,
+                device_scale,
+            );
+        } else if let Ok(mut mouse_motion) = event.clone().try_cast::<InputEventMouseMotion>() {
+            let local_position = self.event_position_to_local(mouse_motion.get_position());
+            mouse_motion.set_position(local_position);
+            self.texture2d_helper.bind().forward_mouse_motion_event(
+                mouse_motion,
+                pixel_scale,
+                device_scale,
+            );
+        } else if let Ok(mut pan_gesture) = event.clone().try_cast::<InputEventPanGesture>() {
+            let local_position = self.event_position_to_local(pan_gesture.get_position());
+            pan_gesture.set_position(local_position);
+            self.texture2d_helper.bind().forward_pan_gesture_event(
+                pan_gesture,
+                pixel_scale,
+                device_scale,
+            );
+        } else if let Ok(mut screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
+            let local_position = self.event_position_to_local(screen_touch.get_position());
+            screen_touch.set_position(local_position);
+            self.texture2d_helper.bind_mut().forward_screen_touch_event(
+                screen_touch,
+                pixel_scale,
+                device_scale,
+            );
+        } else if let Ok(mut screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
+            let local_position = self.event_position_to_local(screen_drag.get_position());
+            screen_drag.set_position(local_position);
+            self.texture2d_helper.bind_mut().forward_screen_drag_event(
+                screen_drag,
+                pixel_scale,
+                device_scale,
+            );
+        } else if let Ok(magnify_gesture) = event.clone().try_cast::<InputEventMagnifyGesture>() {
+            self.texture2d_helper
+                .bind()
+                .forward_magnify_gesture_event(magnify_gesture);
+        } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
+            self.texture2d_helper
+                .bind()
+                .forward_key_event(key_event, self.ime_active);
+        }
+    }
+
+    #[func]
+    /// Executes JavaScript code in the browser's main frame.
+    /// This is a fire-and-forget operation.
+    pub fn eval(&mut self, code: GString) {
+        self.texture2d_helper.bind_mut().eval(code);
+    }
+
+    #[func]
+    fn set_url_property(&mut self, url: GString) {
+        self.url = url.clone();
+        self.texture2d_helper.bind_mut().set_url_property(url);
+    }
+
+    #[func]
+    fn get_enable_accelerated_osr(&self) -> bool {
+        self.enable_accelerated_osr
+    }
+
+    #[func]
+    fn set_enable_accelerated_osr(&mut self, enabled: bool) {
+        self.enable_accelerated_osr = enabled;
+        self.texture2d_helper
+            .bind_mut()
+            .set_enable_accelerated_osr(enabled);
+    }
+
+    #[func]
+    fn get_background_color(&self) -> Color {
+        self.background_color
+    }
+
+    #[func]
+    fn set_background_color(&mut self, color: Color) {
+        self.background_color = color;
+        self.texture2d_helper.bind_mut().set_background_color(color);
+    }
+
+    #[func]
+    fn get_preload_script(&self) -> GString {
+        self.preload_script.clone()
+    }
+
+    #[func]
+    fn set_preload_script(&mut self, script: GString) {
+        self.preload_script = script.clone();
+        self.texture2d_helper.bind_mut().set_preload_script(script);
+    }
+
+    #[func]
+    fn get_preload_script_path(&self) -> GString {
+        self.preload_script_path.clone()
+    }
+
+    #[func]
+    fn set_preload_script_path(&mut self, path: GString) {
+        self.preload_script_path = path.clone();
+        self.texture2d_helper
+            .bind_mut()
+            .set_preload_script_path(path);
+    }
+
+    #[func]
+    /// Navigates back in the browser history.
+    pub fn go_back(&mut self) {
+        self.texture2d_helper.bind_mut().go_back();
+    }
+
+    #[func]
+    /// Navigates forward in the browser history.
+    pub fn go_forward(&mut self) {
+        self.texture2d_helper.bind_mut().go_forward();
+    }
+
+    #[func]
+    pub fn can_go_back(&self) -> bool {
+        self.texture2d_helper.bind().can_go_back()
+    }
+
+    #[func]
+    pub fn can_go_forward(&self) -> bool {
+        self.texture2d_helper.bind().can_go_forward()
+    }
+
+    #[func]
+    /// Reloads the current page.
+    pub fn reload(&mut self) {
+        self.texture2d_helper.bind_mut().reload();
+    }
+
+    #[func]
+    /// Reloads the current page, ignoring cached content.
+    pub fn reload_ignore_cache(&mut self) {
+        self.texture2d_helper.bind_mut().reload_ignore_cache();
+    }
+
+    #[func]
+    /// Stops the current page load.
+    pub fn stop_loading(&mut self) {
+        self.texture2d_helper.bind_mut().stop_loading();
+    }
+
+    #[func]
+    /// Starts a new find-in-page search.
+    pub fn find_text(&mut self, query: GString, forward: bool, match_case: bool) {
+        self.texture2d_helper
+            .bind_mut()
+            .find_text(query, forward, match_case);
+    }
+
+    #[func]
+    /// Jumps to the next result for the last find query.
+    pub fn find_next(&mut self) {
+        self.texture2d_helper.bind_mut().find_next();
+    }
+
+    #[func]
+    /// Jumps to the previous result for the last find query.
+    pub fn find_previous(&mut self) {
+        self.texture2d_helper.bind_mut().find_previous();
+    }
+
+    #[func]
+    /// Stops active find-in-page highlighting and clears selection.
+    pub fn stop_finding(&mut self) {
+        self.texture2d_helper.bind_mut().stop_finding();
+    }
+
+    #[func]
+    /// Returns true if the browser is currently loading a page.
+    pub fn is_loading(&self) -> bool {
+        self.texture2d_helper.bind().is_loading()
+    }
+
+    #[func]
+    fn get_url_property(&self) -> GString {
+        self.texture2d_helper.bind().get_url_property()
+    }
+
+    #[func]
+    /// Sets the zoom level. 0.0 is 100%.
+    /// Positive values zoom in, negative values zoom out.
+    pub fn set_zoom_level(&mut self, level: f64) {
+        self.texture2d_helper.bind_mut().set_zoom_level(level);
+    }
+
+    #[func]
+    /// Returns the current zoom level.
+    pub fn get_zoom_level(&self) -> f64 {
+        self.texture2d_helper.bind().get_zoom_level()
+    }
+
+    #[func]
+    /// Sends a message into the page via `window.onIpcMessage`.
+    ///
+    /// This is intentionally separate from [`Self::eval`]: callers could achieve a
+    /// similar effect with `eval("window.onIpcMessage(...);")`, but this
+    /// helper enforces a consistent IPC pattern (`window.onIpcMessage(message)`).
+    ///
+    /// Uses native CEF process messaging for efficient transfer without
+    /// script injection overhead.
+    ///
+    /// Use this when you want structured IPC into the page, and `eval` when
+    /// you truly need arbitrary JavaScript execution.
+    pub fn send_ipc_message(&mut self, message: GString) {
+        self.texture2d_helper.bind_mut().send_ipc_message(message);
+    }
+
+    #[func]
+    /// Sends binary data into the page via `window.onIpcBinaryMessage`.
+    ///
+    /// The data will be delivered as an ArrayBuffer to the JavaScript callback
+    /// `window.onIpcBinaryMessage(arrayBuffer)` if it is registered.
+    ///
+    /// Uses native CEF process messaging with BinaryValue for zero-copy
+    /// binary transfer without encoding overhead.
+    pub fn send_ipc_binary_message(&mut self, data: PackedByteArray) {
+        self.texture2d_helper
+            .bind_mut()
+            .send_ipc_binary_message(data);
+    }
+
+    #[func]
+    /// Sends typed data into the page via the CBOR-based IPC lane.
+    ///
+    /// Supported inputs include primitive types, arrays, dictionaries and
+    /// packed byte arrays. Unsupported Godot-specific types are tagged as
+    /// metadata maps to keep transport failure-safe.
+    pub fn send_ipc_data(&mut self, data: Variant) {
+        self.texture2d_helper.bind_mut().send_ipc_data(data);
+    }
+
+    #[func]
+    /// Mutes or unmutes audio from this browser instance.
+    pub fn set_audio_muted(&mut self, muted: bool) {
+        self.texture2d_helper.bind_mut().set_audio_muted(muted);
+    }
+
+    #[func]
+    /// Returns true if audio is currently muted.
+    pub fn is_audio_muted(&self) -> bool {
+        self.texture2d_helper.bind().is_audio_muted()
+    }
+
+    /// Creates an AudioStreamGenerator configured for this browser's audio.
+    /// Only works when `godot_cef/audio/enable_audio_capture` is enabled.
+    #[func]
+    pub fn create_audio_stream(&self) -> Gd<godot::classes::AudioStreamGenerator> {
+        use godot::classes::AudioStreamGenerator;
+
+        let mut stream = AudioStreamGenerator::new_gd();
+
+        let sample_rate = self.with_app(|app| {
+            app.state
+                .as_ref()
+                .and_then(|s| s.audio.as_ref())
+                .and_then(|a| a.sample_rate.lock().ok().map(|sr| *sr))
+                .unwrap_or(48000.0)
+        });
+
+        stream.set_mix_rate(sample_rate);
+        stream.set_buffer_length(0.1);
+
+        stream
+    }
+
+    /// Pushes buffered audio data to the given playback. Call every frame.
+    /// Returns the number of frames pushed.
+    #[func]
+    pub fn push_audio_to_playback(
+        &mut self,
+        mut playback: Gd<godot::classes::AudioStreamGeneratorPlayback>,
+    ) -> i32 {
+        let queue = self.with_app(|app| {
+            app.state
+                .as_ref()
+                .and_then(|s| s.audio.as_ref())
+                .map(|a| a.packet_queue.clone())
+        });
+        let Some(queue) = queue else {
+            return 0;
+        };
+
+        let mut total_frames = 0i32;
+
+        if let Ok(mut queue) = queue.lock() {
+            'outer: while let Some(mut packet) = queue.pop_front() {
+                let mut frame_index = 0;
+                let frame_count = packet.data.len() / 2;
+
+                while frame_index < frame_count {
+                    if playback.can_push_buffer(1) {
+                        let i = frame_index * 2;
+                        let frame = Vector2::new(packet.data[i], packet.data[i + 1]);
+                        playback.push_frame(frame);
+                        total_frames += 1;
+                        frame_index += 1;
+                    } else {
+                        // Playback buffer is full. Re-queue remaining data in this packet
+                        // at the front of the queue so it can be processed next frame.
+                        if frame_index < frame_count {
+                            let samples_consumed = frame_index * 2;
+                            packet.data.drain(..samples_consumed);
+                            queue.push_front(packet);
+                        }
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        total_frames
+    }
+
+    /// Returns true if there is audio data available in the buffer.
+    #[func]
+    pub fn has_audio_data(&self) -> bool {
+        self.with_app(|app| {
+            app.state
+                .as_ref()
+                .and_then(|s| s.audio.as_ref())
+                .and_then(|a| a.packet_queue.lock().ok())
+                .is_some_and(|q| !q.is_empty())
+        })
+    }
+
+    /// Returns the number of audio packets currently buffered.
+    #[func]
+    pub fn get_audio_buffer_size(&self) -> i32 {
+        self.with_app(|app| {
+            app.state
+                .as_ref()
+                .and_then(|s| s.audio.as_ref())
+                .and_then(|a| a.packet_queue.lock().ok())
+                .map(|q| q.len() as i32)
+                .unwrap_or(0)
+        })
+    }
+
+    /// Returns true if audio capture mode is enabled in project settings.
+    #[func]
+    pub fn is_audio_capture_enabled(&self) -> bool {
+        crate::settings::is_audio_capture_enabled()
+    }
+
+    #[func]
+    pub fn drag_enter(&mut self, file_paths: Array<GString>, position: Vector2, allowed_ops: i32) {
+        let Some(mut drag_data) = cef::drag_data_create() else {
+            return;
+        };
+
+        for path in file_paths.iter_shared() {
+            let path_str: cef::CefStringUtf16 = path.to_string().as_str().into();
+            drag_data.add_file(Some(&path_str), None);
+        }
+
+        let mouse_event = input::create_mouse_event(
+            position,
+            self.get_pixel_scale_factor(),
+            self.get_device_scale_factor(),
+            0,
+        );
+
+        let ops = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
+            crate::cef_i32_to_raw!(allowed_ops),
+        ));
+        self.with_app_mut(|app| {
+            let Some(host) = app.host() else {
+                return;
+            };
+            host.drag_target_drag_enter(Some(&mut drag_data), Some(&mouse_event), ops);
+            app.drag_state.is_drag_over = true;
+            app.drag_state.allowed_ops = allowed_ops as u32;
+        });
+    }
+
+    #[func]
+    pub fn drag_over(&mut self, position: Vector2, allowed_ops: i32) {
+        let mouse_event = input::create_mouse_event(
+            position,
+            self.get_pixel_scale_factor(),
+            self.get_device_scale_factor(),
+            0,
+        );
+
+        let ops = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
+            crate::cef_i32_to_raw!(allowed_ops),
+        ));
+        self.with_app(|app| {
+            if let Some(host) = app.host() {
+                host.drag_target_drag_over(Some(&mouse_event), ops);
+            }
+        });
+    }
+
+    #[func]
+    pub fn drag_leave(&mut self) {
+        self.with_app_mut(|app| {
+            let Some(host) = app.host() else {
+                return;
+            };
+            host.drag_target_drag_leave();
+            app.drag_state.is_drag_over = false;
+        });
+    }
+
+    #[func]
+    pub fn drag_drop(&mut self, position: Vector2) {
+        let mouse_event = input::create_mouse_event(
+            position,
+            self.get_pixel_scale_factor(),
+            self.get_device_scale_factor(),
+            0,
+        );
+
+        self.with_app_mut(|app| {
+            let Some(host) = app.host() else {
+                return;
+            };
+            host.drag_target_drop(Some(&mouse_event));
+            app.drag_state.is_drag_over = false;
+        });
+    }
+
+    #[func]
+    pub fn drag_source_ended(&mut self, position: Vector2, operation: i32) {
+        let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
+            crate::cef_i32_to_raw!(operation),
+        ));
+        self.with_app_mut(|app| {
+            let Some(host) = app.host() else {
+                return;
+            };
+            if !app.drag_state.is_dragging_from_browser {
+                return;
+            }
+            host.drag_source_ended_at(position.x as i32, position.y as i32, op);
+            host.drag_source_system_drag_ended();
+            app.drag_state.is_dragging_from_browser = false;
+            app.drag_state.source_position = None;
+            app.drag_state.allowed_ops = 0;
+        });
+    }
+
+    #[func]
+    pub fn drag_source_system_ended(&mut self) {
+        self.with_app_mut(|app| {
+            let Some(host) = app.host() else {
+                return;
+            };
+            if !app.drag_state.is_dragging_from_browser {
+                return;
+            }
+            let (x, y) = app.drag_state.source_position.unwrap_or((0, 0));
+            let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(0));
+            host.drag_source_ended_at(x, y, op);
+            host.drag_source_system_drag_ended();
+            app.drag_state.is_dragging_from_browser = false;
+            app.drag_state.source_position = None;
+            app.drag_state.allowed_ops = 0;
+        });
+    }
+
+    #[func]
+    pub fn is_dragging_from_browser(&self) -> bool {
+        self.with_app(|app| app.drag_state.is_dragging_from_browser)
+    }
+
+    #[func]
+    pub fn is_drag_over(&self) -> bool {
+        self.with_app(|app| app.drag_state.is_drag_over)
+    }
+
+    #[func]
+    fn get_popup_policy(&self) -> i32 {
+        self.popup_policy
+    }
+
+    #[func]
+    fn set_popup_policy(&mut self, policy: i32) {
+        self.popup_policy = policy;
+        self.texture2d_helper.bind_mut().set_popup_policy(policy);
+    }
+
+    #[func]
+    pub fn grant_permission(&self, request_id: i64) -> bool {
+        self.with_app(|app| permission_ops::resolve_permission_request(app, request_id, true))
+    }
+
+    #[func]
+    pub fn deny_permission(&self, request_id: i64) -> bool {
+        self.with_app(|app| permission_ops::resolve_permission_request(app, request_id, false))
+    }
+
+    /// Retrieves all cookies. Results are emitted via `cookies_received` signal.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn get_all_cookies(&self) -> bool {
+        self.with_app(cookie_ops::get_all_cookies)
+    }
+
+    /// Retrieves cookies for a specific URL. Results are emitted via `cookies_received` signal.
+    /// If `include_http_only` is true, HTTP-only cookies are included.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn get_cookies(&self, url: GString, include_http_only: bool) -> bool {
+        self.with_app(|app| cookie_ops::get_cookies(app, url, include_http_only))
+    }
+
+    /// Sets a cookie for the given URL.
+    /// The result is emitted via the `cookie_set` signal.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    #[allow(clippy::too_many_arguments)] // GDScript-facing API; each parameter is user-visible
+    pub fn set_cookie(
+        &self,
+        url: GString,
+        name: GString,
+        value: GString,
+        domain: GString,
+        path: GString,
+        secure: bool,
+        httponly: bool,
+    ) -> bool {
+        self.with_app(|app| {
+            cookie_ops::set_cookie(app, url, name, value, domain, path, secure, httponly)
+        })
+    }
+
+    /// Deletes cookies matching the given URL and/or name.
+    /// Pass empty strings to delete all cookies.
+    /// The result is emitted via the `cookies_deleted` signal.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn delete_cookies(&self, url: GString, cookie_name: GString) -> bool {
+        self.with_app(|app| cookie_ops::delete_cookies(app, url, cookie_name))
+    }
+
+    /// Convenience method to delete all cookies.
+    /// Equivalent to `delete_cookies("", "")`.
+    #[func]
+    pub fn clear_cookies(&self) -> bool {
+        self.delete_cookies("".into(), "".into())
+    }
+
+    /// Flushes the cookie store to disk.
+    /// The `cookies_flushed` signal is emitted when complete.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn flush_cookies(&self) -> bool {
+        self.with_app(cookie_ops::flush_cookies)
+    }
+
+    /// Called when the IME proxy LineEdit text changes during composition.
+    #[func]
+    fn on_ime_proxy_text_changed(&mut self, new_text: GString) {
+        self.on_ime_proxy_text_changed_impl(new_text);
+    }
+
+    #[func]
+    fn on_ime_proxy_focus_exited(&mut self) {
+        self.on_ime_proxy_focus_exited_impl();
+    }
+
+    #[func]
+    fn _check_ime_focus_after_exit(&mut self) {
+        self.check_ime_focus_after_exit_impl();
+    }
+
+    fn get_pixel_scale_factor(&self) -> f32 {
+        self.base()
+            .get_viewport()
+            .map(|viewport| viewport.get_stretch_transform().a.x)
+            .unwrap_or(1.0)
+    }
+
+    fn get_device_scale_factor(&self) -> f32 {
+        crate::utils::get_display_scale_factor()
+    }
+}

@@ -64,8 +64,14 @@ public:
 
 	Dictionary test_simulate(const Dictionary &p_state, const Dictionary &p_input, double p_delta) {
 		Dictionary next = p_state;
-		Vector3 position = next.has("position") ? next["position"] : Vector3();
-		Vector3 move = p_input.has("move") ? p_input["move"] : Vector3();
+		Vector3 position;
+		if (next.has("position")) {
+			position = next["position"];
+		}
+		Vector3 move;
+		if (p_input.has("move")) {
+			move = p_input["move"];
+		}
 		position += move * p_delta;
 		next["position"] = position;
 		return next;
@@ -102,6 +108,19 @@ TEST_CASE("[Multiplayer][Smoothing] Simulation clock exposes delayed render tick
 	CHECK_EQ(clock->get_observed_server_tick(), 12);
 	CHECK_EQ(clock->get_render_tick(), 10);
 	CHECK_EQ(clock->get_render_fraction(), doctest::Approx(0.0));
+
+	clock->advance(1.0 / 60.0);
+	CHECK_EQ(clock->get_render_fraction(), doctest::Approx(0.5));
+	CHECK_EQ(clock->get_render_tick_time(), doctest::Approx(10.5));
+
+	clock->observe_server_tick(12);
+	clock->observe_server_tick(11);
+	CHECK_EQ(clock->get_render_fraction(), doctest::Approx(0.5));
+	CHECK_EQ(clock->get_render_tick_time(), doctest::Approx(10.5));
+
+	clock->observe_server_tick(13);
+	CHECK_EQ(clock->get_render_fraction(), doctest::Approx(0.0));
+	CHECK_EQ(clock->get_render_tick_time(), doctest::Approx(11.0));
 }
 
 TEST_CASE("[Multiplayer][Smoothing] Snapshot buffer samples midpoint interpolation") {
@@ -110,7 +129,7 @@ TEST_CASE("[Multiplayer][Smoothing] Snapshot buffer samples midpoint interpolati
 
 	const int64_t entity_id = 42;
 	buffer->push_transform(entity_id, 10, Transform3D(Basis(), Vector3(0, 0, 0)));
-	buffer->push_transform(entity_id, 12, Transform3D(Basis(), Vector3(10, 0, 0)));
+	buffer->push_transform(entity_id, 12, Transform3D(Basis(Vector3(0, 1, 0), Math::PI / 2.0), Vector3(10, 0, 0)));
 
 	Dictionary sample = buffer->sample_transform(entity_id, 11.0);
 	CHECK(bool(sample["ok"]));
@@ -118,6 +137,7 @@ TEST_CASE("[Multiplayer][Smoothing] Snapshot buffer samples midpoint interpolati
 
 	Transform3D transform = sample["transform"];
 	CHECK(transform.origin.is_equal_approx(Vector3(5, 0, 0)));
+	CHECK(transform.basis.get_euler().y == doctest::Approx(Math::PI / 4.0));
 }
 
 TEST_CASE("[Multiplayer][Smoothing] Snapshot buffer snaps across teleports") {

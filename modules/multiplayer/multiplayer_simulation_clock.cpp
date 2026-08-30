@@ -64,6 +64,7 @@ void MultiplayerSimulationClock::set_tick_rate(int p_tick_rate) {
 	if (accumulator >= tick_delta) {
 		accumulator = Math::fmod(accumulator, tick_delta);
 	}
+	observed_tick_elapsed = MIN(observed_tick_elapsed, tick_delta);
 }
 
 int MultiplayerSimulationClock::get_tick_rate() const {
@@ -87,10 +88,15 @@ void MultiplayerSimulationClock::reset() {
 	local_tick = 0;
 	observed_server_tick = -1;
 	accumulator = 0.0;
+	observed_tick_elapsed = 0.0;
 }
 
 int MultiplayerSimulationClock::advance(double p_delta) {
 	ERR_FAIL_COND_V_MSG(p_delta < 0.0, 0, "Delta must be non-negative.");
+
+	if (observed_server_tick >= 0) {
+		observed_tick_elapsed = MIN(observed_tick_elapsed + p_delta, get_tick_delta());
+	}
 
 	accumulator += p_delta;
 	const double tick_delta = get_tick_delta();
@@ -116,6 +122,7 @@ int64_t MultiplayerSimulationClock::get_local_tick() const {
 void MultiplayerSimulationClock::observe_server_tick(int64_t p_tick) {
 	if (p_tick > observed_server_tick) {
 		observed_server_tick = p_tick;
+		observed_tick_elapsed = 0.0;
 	}
 }
 
@@ -130,7 +137,7 @@ int64_t MultiplayerSimulationClock::get_render_tick() const {
 
 double MultiplayerSimulationClock::get_render_fraction() const {
 	if (observed_server_tick >= 0) {
-		return 0.0;
+		return CLAMP(observed_tick_elapsed / get_tick_delta(), 0.0, 1.0);
 	}
 	return CLAMP(accumulator / get_tick_delta(), 0.0, 1.0);
 }

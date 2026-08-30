@@ -1,0 +1,642 @@
+use cef::sys::cef_event_flags_t;
+use cef::{
+    ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent, PointerType,
+    TouchEvent, TouchEventType,
+};
+use godot::classes::{
+    InputEvent, InputEventKey, InputEventMagnifyGesture, InputEventMouseButton,
+    InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag, InputEventScreenTouch,
+};
+use godot::global::{Key, MouseButton, MouseButtonMask};
+use godot::prelude::*;
+use std::collections::HashMap;
+
+mod keycode;
+
+/// Standard wheel delta for one scroll "notch" (Windows convention used by CEF).
+const WHEEL_DELTA: f32 = 120.0;
+const MAGNIFY_ZOOM_SENSITIVITY: f64 = 0.5;
+
+/// Pre-defined shortcuts for editor commands.
+///
+/// Created on each use rather than cached in `thread_local!` because `Gd<T>`
+/// objects require the Godot engine to be alive during `Drop`. Thread-local
+/// destructors run after Godot has shut down, causing either a panic or leaked
+/// instances. Since keyboard shortcuts are matched at human typing speed (not
+/// per-frame), the allocation cost is negligible.
+struct EditorShortcuts {
+    select_all: Gd<InputEvent>,            // Ctrl/Cmd+A
+    copy: Gd<InputEvent>,                  // Ctrl/Cmd+C
+    cut: Gd<InputEvent>,                   // Ctrl/Cmd+X
+    paste_and_match_style: Gd<InputEvent>, // Ctrl/Cmd+Shift+V
+}
+
+impl EditorShortcuts {
+    fn new() -> Self {
+        Self {
+            select_all: create_shortcut(Key::A, true, false),
+            copy: create_shortcut(Key::C, true, false),
+            cut: create_shortcut(Key::X, true, false),
+            paste_and_match_style: create_shortcut(Key::V, true, true),
+        }
+    }
+}
+
+fn with_shortcuts<F, R>(f: F) -> R
+where
+    F: FnOnce(&EditorShortcuts) -> R,
+{
+    let shortcuts = EditorShortcuts::new();
+    f(&shortcuts)
+}
+fn create_shortcut(key: Key, with_command_or_ctrl: bool, with_shift: bool) -> Gd<InputEvent> {
+    let mut key_event = InputEventKey::new_gd();
+    key_event.set_keycode(key);
+
+    if with_command_or_ctrl {
+        key_event.set_command_or_control_autoremap(true);
+    }
+
+    if with_shift {
+        key_event.set_shift_pressed(true);
+    }
+
+    key_event.to_variant().to()
+}
+
+/// Macro to extract keyboard modifier flags from any event with modifier methods
+macro_rules! keyboard_modifiers {
+    ($event:expr) => {{
+        let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE;
+        if $event.is_shift_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN;
+        }
+        if $event.is_ctrl_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN;
+        }
+        if $event.is_alt_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN;
+        }
+        if $event.is_meta_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN;
+        }
+
+        crate::compat::event_flags_to_u32(modifiers)
+    }};
+}
+
+/// Extracts mouse button modifier flags from a button mask
+fn mouse_button_modifiers(button_mask: MouseButtonMask) -> u32 {
+    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE;
+
+    if button_mask.is_set(MouseButtonMask::LEFT) {
+        modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON;
+    }
+    if button_mask.is_set(MouseButtonMask::MIDDLE) {
+        modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON;
+    }
+    if button_mask.is_set(MouseButtonMask::RIGHT) {
+        modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON;
+    }
+
+    crate::compat::event_flags_to_u32(modifiers)
+}
+
+/// Creates a CEF mouse event from Godot position and DPI scale
+pub fn create_mouse_event(
+    position: Vector2,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+    modifiers: u32,
+) -> MouseEvent {
+    let x = (position.x * pixel_scale_factor / device_scale_factor) as i32;
+    let y = (position.y * pixel_scale_factor / device_scale_factor) as i32;
+
+    MouseEvent { x, y, modifiers }
+}
+
+/// Handles mouse button events and sends them to CEF browser host
+pub fn handle_mouse_button(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventMouseButton>,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+) {
+    let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
+    let position = event.get_position();
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
+
+    match event.get_button_index() {
+        MouseButton::LEFT | MouseButton::MIDDLE | MouseButton::RIGHT => {
+            let button_type = match event.get_button_index() {
+                MouseButton::LEFT => MouseButtonType::LEFT,
+                MouseButton::MIDDLE => MouseButtonType::MIDDLE,
+                MouseButton::RIGHT => MouseButtonType::RIGHT,
+                _ => return,
+            };
+            let mouse_up = !event.is_pressed();
+            let click_count = if event.is_double_click() { 2 } else { 1 };
+            host.send_mouse_click_event(
+                Some(&mouse_event),
+                button_type,
+                mouse_up as i32,
+                click_count,
+            );
+        }
+        MouseButton::WHEEL_UP => {
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
+            host.send_mouse_wheel_event(Some(&mouse_event), 0, delta);
+        }
+        MouseButton::WHEEL_DOWN => {
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
+            host.send_mouse_wheel_event(Some(&mouse_event), 0, -delta);
+        }
+        MouseButton::WHEEL_LEFT => {
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
+            host.send_mouse_wheel_event(Some(&mouse_event), -delta, 0);
+        }
+        MouseButton::WHEEL_RIGHT => {
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
+            host.send_mouse_wheel_event(Some(&mouse_event), delta, 0);
+        }
+        _ => {}
+    }
+}
+
+/// Handles mouse motion events and sends them to CEF browser host
+pub fn handle_mouse_motion(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventMouseMotion>,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+) {
+    let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
+    let position = event.get_position();
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
+    host.send_mouse_move_event(Some(&mouse_event), false as i32);
+}
+
+/// Handles pan gesture events (trackpad scrolling) and sends them to CEF browser host
+pub fn handle_pan_gesture(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventPanGesture>,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+) {
+    let modifiers = keyboard_modifiers!(event);
+    let position = event.get_position();
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
+
+    let delta = event.get_delta();
+    // Convert pan delta to scroll wheel delta
+    // Pan gesture delta is typically smaller, so we scale it up
+    // Negative because pan direction is opposite to scroll direction
+    let delta_x = (-delta.x * WHEEL_DELTA / device_scale_factor) as i32;
+    let delta_y = (-delta.y * WHEEL_DELTA / device_scale_factor) as i32;
+
+    if delta_x != 0 || delta_y != 0 {
+        host.send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
+    }
+}
+
+fn create_touch_event(
+    position: Vector2,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+    type_: TouchEventType,
+    id: i32,
+    pressure: f32,
+) -> TouchEvent {
+    TouchEvent {
+        id,
+        x: position.x * pixel_scale_factor / device_scale_factor,
+        y: position.y * pixel_scale_factor / device_scale_factor,
+        pressure: pressure.clamp(0.0, 1.0),
+        type_,
+        pointer_type: PointerType::TOUCH,
+        ..Default::default()
+    }
+}
+
+fn touch_id_for_index(
+    _touch_id_map: &mut HashMap<i32, i32>,
+    _next_touch_id: &mut i32,
+    index: i32,
+) -> i32 {
+    // Use the Godot touch index directly as the CEF touch ID.
+    // This avoids unbounded growth and potential overflow of a separate counter,
+    // while still providing a stable ID for the duration of each touch.
+    index
+}
+
+/// Handles screen touch events and sends them to CEF browser host.
+pub fn handle_screen_touch(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventScreenTouch>,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+    touch_id_map: &mut HashMap<i32, i32>,
+    next_touch_id: &mut i32,
+) {
+    let index = event.get_index();
+    let is_canceled = event.is_canceled();
+    let is_pressed = event.is_pressed();
+    let type_ = if is_canceled {
+        TouchEventType::CANCELLED
+    } else if is_pressed {
+        TouchEventType::PRESSED
+    } else {
+        TouchEventType::RELEASED
+    };
+
+    let id = touch_id_for_index(touch_id_map, next_touch_id, index);
+    let touch_event = create_touch_event(
+        event.get_position(),
+        pixel_scale_factor,
+        device_scale_factor,
+        type_,
+        id,
+        1.0,
+    );
+    host.send_touch_event(Some(&touch_event));
+
+    if !is_pressed || is_canceled {
+        touch_id_map.remove(&index);
+    }
+}
+
+/// Handles screen drag events and sends them to CEF browser host.
+pub fn handle_screen_drag(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventScreenDrag>,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+    touch_id_map: &mut HashMap<i32, i32>,
+    next_touch_id: &mut i32,
+) {
+    let index = event.get_index();
+    let id = touch_id_for_index(touch_id_map, next_touch_id, index);
+    let touch_event = create_touch_event(
+        event.get_position(),
+        pixel_scale_factor,
+        device_scale_factor,
+        TouchEventType::MOVED,
+        id,
+        event.get_pressure(),
+    );
+    host.send_touch_event(Some(&touch_event));
+}
+
+/// Handles magnify gesture events and maps them to browser zoom level changes.
+pub fn handle_magnify_gesture(host: &impl ImplBrowserHost, event: &Gd<InputEventMagnifyGesture>) {
+    let factor = event.get_factor() as f64;
+    if factor.abs() <= f64::EPSILON {
+        return;
+    }
+
+    let current_zoom = host.zoom_level();
+    host.set_zoom_level(current_zoom + (factor * MAGNIFY_ZOOM_SENSITIVITY));
+}
+
+/// Handles keyboard events and sends them to CEF browser host
+pub fn handle_key_event(
+    host: &impl ImplBrowserHost,
+    frame: Option<&impl ImplFrame>,
+    event: &Gd<InputEventKey>,
+    focus_on_editable_field: bool,
+) {
+    let mut modifiers = keyboard_modifiers!(event);
+
+    // Check if it's from the keypad
+    if is_keypad_key(event.get_physical_keycode()) {
+        modifiers |= crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_IS_KEY_PAD);
+    }
+
+    let is_pressed = event.is_pressed();
+    let is_echo = event.is_echo();
+    let keycode = event.get_keycode();
+
+    // Godot also sends a KEY event for the NONE key for characters, which we don't want to process.
+    if keycode == Key::NONE {
+        return;
+    }
+
+    // Handle shortcuts using pre-cached Shortcut objects
+    if is_pressed
+        && !is_echo
+        && let Some(frame) = frame
+    {
+        let input_event: Gd<InputEvent> = event.to_variant().to();
+        let handled = with_shortcuts(|shortcuts| {
+            if shortcuts.select_all.is_match(&input_event) {
+                frame.select_all();
+                return true;
+            } else if shortcuts.copy.is_match(&input_event) {
+                frame.copy();
+                return true;
+            } else if shortcuts.cut.is_match(&input_event) {
+                frame.cut();
+                return true;
+            } else if shortcuts.paste_and_match_style.is_match(&input_event) {
+                frame.paste_and_match_style();
+                return true;
+            }
+            // The normal paste shortcut is handled by the browser host itself,
+            // which is why we don't need to handle it here.
+            false
+        });
+        if handled {
+            return;
+        }
+    }
+
+    // Get the Windows virtual key code from Godot key (CEF expects this on all platforms)
+    let windows_key_code = keycode::godot_key_to_windows_keycode(keycode);
+
+    // Get platform-specific native key code
+    let native_key_code = keycode::godot_key_to_native_keycode(keycode);
+
+    // Get the character code - for printable keys use unicode,
+    // for control characters use their ASCII codes
+    let unicode = event.get_unicode();
+
+    let character = if unicode != 0 {
+        unicode as u16
+    } else {
+        // Use ASCII codes for control characters
+        get_control_char_code(keycode)
+    };
+
+    // For key press events, send RAWKEYDOWN for initial press, KEYDOWN for repeat
+    if is_pressed {
+        let key_event = KeyEvent {
+            type_: if is_echo {
+                KeyEventType::KEYDOWN
+            } else {
+                KeyEventType::RAWKEYDOWN
+            },
+            modifiers,
+            windows_key_code,
+            native_key_code,
+            is_system_key: 0,
+            character,
+            unmodified_character: character,
+            focus_on_editable_field: focus_on_editable_field as _,
+            ..Default::default()
+        };
+        host.send_key_event(Some(&key_event));
+
+        // Send a CHAR event for printable characters AND control characters that need it
+        // (Backspace, Tab, Enter need CHAR events for text input to work)
+        // When focus is on an editable field, we don't need to send CHAR events.
+        if should_send_char_event(keycode, unicode) && !focus_on_editable_field {
+            let char_event = KeyEvent {
+                type_: KeyEventType::CHAR,
+                modifiers,
+                // For CHAR events, use the character code (not the virtual key code)
+                // for windows_key_code and native_key_code, matching Windows WM_CHAR
+                // behavior where wParam contains the character value.
+                windows_key_code: character as i32,
+                native_key_code: character as i32,
+                is_system_key: 0,
+                character,
+                unmodified_character: character,
+                focus_on_editable_field: focus_on_editable_field as _,
+                ..Default::default()
+            };
+            host.send_key_event(Some(&char_event));
+        }
+    } else {
+        // Key release event
+        // Skip KEYUP for navigation keys - works around a CEF issue where KEYUP
+        // triggers arrow key actions on macOS
+        if !is_navigation_key(keycode) {
+            let key_event = KeyEvent {
+                type_: KeyEventType::KEYUP,
+                modifiers,
+                windows_key_code,
+                native_key_code,
+                is_system_key: 0,
+                character,
+                unmodified_character: character,
+                focus_on_editable_field: focus_on_editable_field as _,
+                ..Default::default()
+            };
+            host.send_key_event(Some(&key_event));
+        }
+    }
+}
+
+/// Returns the ASCII control character code for special keys
+fn get_control_char_code(key: Key) -> u16 {
+    match key {
+        Key::BACKSPACE => 0x08,             // BS (Backspace)
+        Key::TAB => 0x09,                   // HT (Horizontal Tab)
+        Key::ENTER | Key::KP_ENTER => 0x0D, // CR (Carriage Return)
+        Key::ESCAPE => 0x1B,                // ESC
+        Key::DELETE => 0x7F,                // DEL
+        _ => 0,
+    }
+}
+
+/// Determines if a CHAR event should be sent for this key
+fn should_send_char_event(key: Key, unicode: u32) -> bool {
+    // Never send CHAR for modifier or navigation keys
+    if is_modifier_key(key) || is_navigation_key(key) {
+        return false;
+    }
+
+    // Send CHAR for printable characters
+    if unicode != 0 {
+        return true;
+    }
+
+    false
+}
+
+/// Checks if a key is a navigation key (arrows, home, end, page up/down)
+fn is_navigation_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::UP
+            | Key::DOWN
+            | Key::LEFT
+            | Key::RIGHT
+            | Key::HOME
+            | Key::END
+            | Key::PAGEUP
+            | Key::PAGEDOWN
+    )
+}
+
+/// Checks if a key is a modifier key (these should never send CHAR events)
+fn is_modifier_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::SHIFT
+            | Key::CTRL
+            | Key::ALT
+            | Key::META
+            | Key::CAPSLOCK
+            | Key::NUMLOCK
+            | Key::SCROLLLOCK
+    )
+}
+
+/// Checks if a key is from the numeric keypad
+fn is_keypad_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::KP_0
+            | Key::KP_1
+            | Key::KP_2
+            | Key::KP_3
+            | Key::KP_4
+            | Key::KP_5
+            | Key::KP_6
+            | Key::KP_7
+            | Key::KP_8
+            | Key::KP_9
+            | Key::KP_MULTIPLY
+            | Key::KP_SUBTRACT
+            | Key::KP_PERIOD
+            | Key::KP_ADD
+            | Key::KP_DIVIDE
+            | Key::KP_ENTER
+    )
+}
+
+/// Commits IME text to the CEF browser
+/// Call this when an IME composition is finalized
+pub fn ime_commit_text(host: &impl ImplBrowserHost, text: &str) {
+    let cef_text: cef::CefString = text.into();
+    let invalid_range = cef::Range {
+        from: u32::MAX,
+        to: u32::MAX,
+    };
+    host.ime_commit_text(Some(&cef_text), Some(&invalid_range), 0);
+}
+
+pub fn ime_set_composition(
+    host: &impl ImplBrowserHost,
+    text: &str,
+    selection_start: u32,
+    selection_end: u32,
+) {
+    let cef_text: cef::CefString = text.into();
+    let text_len = text.chars().count() as u32;
+
+    // Create an underline for the entire composition text
+    let underline = cef::CompositionUnderline {
+        size: std::mem::size_of::<cef::CompositionUnderline>(),
+        range: cef::Range {
+            from: 0,
+            to: text_len,
+        },
+        // Use default/system IME underline color (0 lets CEF choose an appropriate color)
+        color: 0,
+        background_color: 0,
+        thick: 0, // thin underline
+        style: cef::CompositionUnderlineStyle::SOLID,
+    };
+    let underlines = [underline];
+
+    let invalid_range = cef::Range {
+        from: u32::MAX,
+        to: u32::MAX,
+    };
+
+    // Selection range is at the cursor position
+    let selection_range = cef::Range {
+        from: selection_start,
+        to: selection_end,
+    };
+
+    host.ime_set_composition(
+        Some(&cef_text),
+        Some(&underlines),
+        Some(&invalid_range),
+        Some(&selection_range),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_control_char_code() {
+        assert_eq!(get_control_char_code(Key::BACKSPACE), 0x08);
+        assert_eq!(get_control_char_code(Key::TAB), 0x09);
+        assert_eq!(get_control_char_code(Key::ENTER), 0x0D);
+        assert_eq!(get_control_char_code(Key::KP_ENTER), 0x0D);
+        assert_eq!(get_control_char_code(Key::ESCAPE), 0x1B);
+        assert_eq!(get_control_char_code(Key::DELETE), 0x7F);
+        // Non-control keys return 0
+        assert_eq!(get_control_char_code(Key::A), 0);
+        assert_eq!(get_control_char_code(Key::SPACE), 0);
+    }
+
+    #[test]
+    fn test_is_navigation_key() {
+        assert!(is_navigation_key(Key::UP));
+        assert!(is_navigation_key(Key::DOWN));
+        assert!(is_navigation_key(Key::LEFT));
+        assert!(is_navigation_key(Key::RIGHT));
+        assert!(is_navigation_key(Key::HOME));
+        assert!(is_navigation_key(Key::END));
+        assert!(is_navigation_key(Key::PAGEUP));
+        assert!(is_navigation_key(Key::PAGEDOWN));
+        // Non-navigation keys
+        assert!(!is_navigation_key(Key::A));
+        assert!(!is_navigation_key(Key::ENTER));
+        assert!(!is_navigation_key(Key::SPACE));
+    }
+
+    #[test]
+    fn test_is_modifier_key() {
+        assert!(is_modifier_key(Key::SHIFT));
+        assert!(is_modifier_key(Key::CTRL));
+        assert!(is_modifier_key(Key::ALT));
+        assert!(is_modifier_key(Key::META));
+        assert!(is_modifier_key(Key::CAPSLOCK));
+        assert!(is_modifier_key(Key::NUMLOCK));
+        assert!(is_modifier_key(Key::SCROLLLOCK));
+        // Non-modifier keys
+        assert!(!is_modifier_key(Key::A));
+        assert!(!is_modifier_key(Key::ENTER));
+    }
+
+    #[test]
+    fn test_is_keypad_key() {
+        assert!(is_keypad_key(Key::KP_0));
+        assert!(is_keypad_key(Key::KP_9));
+        assert!(is_keypad_key(Key::KP_MULTIPLY));
+        assert!(is_keypad_key(Key::KP_ADD));
+        assert!(is_keypad_key(Key::KP_SUBTRACT));
+        assert!(is_keypad_key(Key::KP_PERIOD));
+        assert!(is_keypad_key(Key::KP_DIVIDE));
+        assert!(is_keypad_key(Key::KP_ENTER));
+        // Non-keypad keys
+        assert!(!is_keypad_key(Key::KEY_0));
+        assert!(!is_keypad_key(Key::ENTER));
+    }
+
+    #[test]
+    fn test_should_send_char_event() {
+        // Printable characters with unicode > 0 should send CHAR
+        assert!(should_send_char_event(Key::A, 'a' as u32));
+        assert!(should_send_char_event(Key::SPACE, ' ' as u32));
+        // Modifier keys should never send CHAR
+        assert!(!should_send_char_event(Key::SHIFT, 0));
+        assert!(!should_send_char_event(Key::CTRL, 0));
+        // Navigation keys should never send CHAR
+        assert!(!should_send_char_event(Key::UP, 0));
+        assert!(!should_send_char_event(Key::LEFT, 0));
+        // Non-printable, non-modifier, non-navigation keys with unicode=0 should not send CHAR
+        assert!(!should_send_char_event(Key::F1, 0));
+    }
+}

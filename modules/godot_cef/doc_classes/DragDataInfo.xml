@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DragDataInfo" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Browser drag payload metadata.
+	</brief_description>
+	<description>
+		Contains metadata for drag operations emitted by CefTexture.
+	</description>
+	<methods>
+		<method name="create" qualifiers="static">
+			<return type="DragDataInfo" />
+			<description>
+				Returns a new drag payload metadata object.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="is_link" type="bool" setter="set_is_link" getter="get_is_link" default="false">
+			True when the payload is a link.
+		</member>
+		<member name="is_file" type="bool" setter="set_is_file" getter="get_is_file" default="false">
+			True when the payload contains files.
+		</member>
+		<member name="is_fragment" type="bool" setter="set_is_fragment" getter="get_is_fragment" default="false">
+			True when the payload contains selected text or HTML.
+		</member>
+		<member name="link_url" type="String" setter="set_link_url" getter="get_link_url" default="&quot;&quot;">
+			URL for link drags.
+		</member>
+		<member name="link_title" type="String" setter="set_link_title" getter="get_link_title" default="&quot;&quot;">
+			Title for link drags.
+		</member>
+		<member name="fragment_text" type="String" setter="set_fragment_text" getter="get_fragment_text" default="&quot;&quot;">
+			Plain text for fragment drags.
+		</member>
+		<member name="fragment_html" type="String" setter="set_fragment_html" getter="get_fragment_html" default="&quot;&quot;">
+			HTML text for fragment drags.
+		</member>
+		<member name="file_names" type="Array" setter="set_file_names" getter="get_file_names" default="[]">
+			File paths for file drags.
+		</member>
+	</members>
+</class>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DownloadUpdateInfo" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Browser download progress metadata.
+	</brief_description>
+	<description>
+		Emitted with CefTexture download_updated.
+	</description>
+	<members>
+		<member name="id" type="int" setter="set_id" getter="get_id" default="0">
+			Unique download identifier.
+		</member>
+		<member name="url" type="String" setter="set_url" getter="get_url" default="&quot;&quot;">
+			Download URL.
+		</member>
+		<member name="full_path" type="String" setter="set_full_path" getter="get_full_path" default="&quot;&quot;">
+			Destination path for the download.
+		</member>
+		<member name="received_bytes" type="int" setter="set_received_bytes" getter="get_received_bytes" default="0">
+			Bytes received so far.
+		</member>
+		<member name="total_bytes" type="int" setter="set_total_bytes" getter="get_total_bytes" default="-1">
+			Expected byte count, or -1 if unknown.
+		</member>
+		<member name="current_speed" type="int" setter="set_current_speed" getter="get_current_speed" default="0">
+			Current download speed in bytes per second.
+		</member>
+		<member name="percent_complete" type="int" setter="set_percent_complete" getter="get_percent_complete" default="-1">
+			Download progress from 0 to 100, or -1 if unknown.
+		</member>
+		<member name="is_in_progress" type="bool" setter="set_is_in_progress" getter="get_is_in_progress" default="false">
+			True while the download is active.
+		</member>
+		<member name="is_complete" type="bool" setter="set_is_complete" getter="get_is_complete" default="false">
+			True when the download completed.
+		</member>
+		<member name="is_canceled" type="bool" setter="set_is_canceled" getter="get_is_canceled" default="false">
+			True when the download was canceled.
+		</member>
+	</members>
+</class>

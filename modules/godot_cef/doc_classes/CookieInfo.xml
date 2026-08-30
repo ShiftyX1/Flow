@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CookieInfo" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Browser cookie metadata.
+	</brief_description>
+	<description>
+		Returned by Godot CEF cookie APIs.
+	</description>
+	<members>
+		<member name="name" type="String" setter="set_name" getter="get_name" default="&quot;&quot;">
+			Cookie name.
+		</member>
+		<member name="value" type="String" setter="set_value" getter="get_value" default="&quot;&quot;">
+			Cookie value.
+		</member>
+		<member name="domain" type="String" setter="set_domain" getter="get_domain" default="&quot;&quot;">
+			Cookie domain.
+		</member>
+		<member name="path" type="String" setter="set_path" getter="get_path" default="&quot;&quot;">
+			Cookie path.
+		</member>
+		<member name="secure" type="bool" setter="set_secure" getter="get_secure" default="false">
+			True when the cookie is restricted to secure transports.
+		</member>
+		<member name="httponly" type="bool" setter="set_httponly" getter="get_httponly" default="false">
+			True when script access is disabled for the cookie.
+		</member>
+		<member name="same_site" type="int" setter="set_same_site" getter="get_same_site" default="0">
+			CEF SameSite policy value.
+		</member>
+		<member name="has_expires" type="bool" setter="set_has_expires" getter="get_has_expires" default="false">
+			True when the cookie has an expiration value.
+		</member>
+	</members>
+</class>

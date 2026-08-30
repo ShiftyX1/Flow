@@ -40,6 +40,7 @@ class MultiplayerSimulationClock : public RefCounted {
 	int64_t local_tick = 0;
 	int64_t observed_server_tick = -1;
 	double accumulator = 0.0;
+	double observed_tick_elapsed = 0.0;
 
 protected:
 	static void _bind_methods();

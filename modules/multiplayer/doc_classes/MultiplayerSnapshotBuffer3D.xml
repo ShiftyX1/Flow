@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MultiplayerSnapshotBuffer3D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Stores and samples delayed 3D transform snapshots for multiple network entities.
+	</brief_description>
+	<description>
+		Snapshots are stored independently by entity ID and must be pushed in increasing tick order. Sampling interpolates complete 3D transforms between surrounding snapshots. A snapshot marked as a teleport is not blended with the preceding snapshot. When sampling beyond the newest snapshot, linear velocity extrapolation is capped by [member max_extrapolation_ticks].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear">
+			<return type="void" />
+			<param index="0" name="entity_id" type="int" default="-1" />
+			<description>
+				Clears snapshots for [param entity_id], or all entities when [param entity_id] is negative.
+			</description>
+		</method>
+		<method name="get_latest_tick" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="entity_id" type="int" />
+			<description>
+				Returns the newest buffered tick, or [code]-1[/code] when the entity has no snapshots.
+			</description>
+		</method>
+		<method name="get_snapshot_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="entity_id" type="int" />
+			<description>
+				Returns the number of buffered snapshots for the entity.
+			</description>
+		</method>
+		<method name="get_tick_delta" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the duration of one snapshot tick in seconds.
+			</description>
+		</method>
+		<method name="push_transform">
+			<return type="bool" />
+			<param index="0" name="entity_id" type="int" />
+			<param index="1" name="tick" type="int" />
+			<param index="2" name="transform" type="Transform3D" />
+			<param index="3" name="linear_velocity" type="Vector3" default="Vector3(0, 0, 0)" />
+			<param index="4" name="teleport" type="bool" default="false" />
+			<description>
+				Adds a transform snapshot. Returns [code]false[/code] for a duplicate or stale tick.
+			</description>
+		</method>
+		<method name="sample_transform" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="entity_id" type="int" />
+			<param index="1" name="render_tick" type="float" />
+			<description>
+				Samples the entity at a fractional tick. The result contains [code]ok[/code], [code]mode[/code], [code]tick[/code], [code]transform[/code], [code]linear_velocity[/code], and [code]teleport[/code], plus interpolation or extrapolation metadata when applicable.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_extrapolation_ticks" type="int" setter="set_max_extrapolation_ticks" getter="get_max_extrapolation_ticks" default="2">
+			Maximum number of ticks to extrapolate beyond an entity's newest snapshot.
+		</member>
+		<member name="max_snapshots" type="int" setter="set_max_snapshots" getter="get_max_snapshots" default="32">
+			Maximum buffered snapshot count per entity.
+		</member>
+		<member name="tick_rate" type="int" setter="set_tick_rate" getter="get_tick_rate" default="30">
+			Snapshot ticks per second.
+		</member>
+	</members>
+</class>

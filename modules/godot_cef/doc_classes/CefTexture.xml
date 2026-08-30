@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CefTexture" inherits="TextureRect" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Browser node backed by Chromium Embedded Framework.
+	</brief_description>
+	<description>
+		C++ module port of the Godot CEF browser node. The public API mirrors the former GDExtension addon; the CEF backend is connected by the module runtime.
+	</description>
+</class>

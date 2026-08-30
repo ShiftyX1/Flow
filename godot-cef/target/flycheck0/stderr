@@ -1,0 +1,23 @@
+error: rustc 1.90.0 is not supported by the following packages:
+  cargo-platform@0.3.3 requires rustc 1.91
+  godot@0.5.3 requires rustc 1.94
+  godot-bindings@0.5.3 requires rustc 1.94
+  godot-bindings@0.5.3 requires rustc 1.94
+  godot-bindings@0.5.3 requires rustc 1.94
+  godot-cell@0.5.3 requires rustc 1.94
+  godot-codegen@0.5.3 requires rustc 1.94
+  godot-codegen@0.5.3 requires rustc 1.94
+  godot-codegen@0.5.3 requires rustc 1.94
+  godot-core@0.5.3 requires rustc 1.94
+  godot-core@0.5.3 requires rustc 1.94
+  godot-core@0.5.3 requires rustc 1.94
+  godot-ffi@0.5.3 requires rustc 1.94
+  godot-ffi@0.5.3 requires rustc 1.94
+  godot-ffi@0.5.3 requires rustc 1.94
+  godot-macros@0.5.3 requires rustc 1.94
+  godot-macros@0.5.3 requires rustc 1.94
+  godot-macros@0.5.3 requires rustc 1.94
+Either upgrade rustc or select compatible dependency versions with
+`cargo update <name>@<current-ver> --precise <compatible-ver>`
+where `<compatible-ver>` is the latest version supporting rustc 1.90.0
+

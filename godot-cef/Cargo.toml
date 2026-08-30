@@ -1,0 +1,79 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask", "benches"]
+
+[workspace.package]
+version = "1.15.3"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/dsh0416/godot-cef"
+
+[workspace.dependencies]
+godot = { version = "0.5.3", features = ["api-4-5", "experimental-threads"] }
+cef = { version = "148.2.0", features = ["sandbox", "accelerated_osr"] }
+cef-dll-sys = { version = "148.2.0", features = ["sandbox"] }
+process_path = "0.1.4"
+plist = { version = "1" }
+serde = { version = "1", features = ["derive"] }
+libloading = { version = "0.9" }
+wide = "1.0"
+ash = { version = "0.38", default-features = false, features = ["std", "debug", "loaded"] }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D11on12",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging"
+] }
+objc2 = "0.6"
+objc2-metal = { version = "0.3", features = [
+    "MTLDevice",
+    "MTLCommandQueue",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLBlitCommandEncoder",
+    "MTLTexture",
+    "MTLTypes",
+    "MTLResource",
+    "MTLPixelFormat",
+] }
+retour = { version = "0.4.0-alpha.4", features = ["static-detour"] }
+libc = "0.2"
+criterion = { version = "0.8", features = ["html_reports"] }
+url = "2"
+percent-encoding = "2"
+adblock = "0.12"
+ciborium = "0.2"
+quick-xml = "0.40"
+
+[workspace.lints.rust]
+unconditional_panic = "deny"
+
+[workspace.lints.clippy]
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+panic_in_result_fn = "deny"
+
+[profile.release]
+debug = "line-tables-only"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+debug = "line-tables-only"
+lto = true
+codegen-units = 1

@@ -602,7 +602,8 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 				env->set_fog_light_energy(Math::lerp(0.3f, 1.0f, day_factor));
 				env->set_fog_sun_scatter(Math::lerp(0.0f, 0.8f, twilight) * p_local_light);
 				env->set_fog_density(1.0f);
-				env->set_fog_sky_affect(0.85f * p_local_light);
+				// Keep distance fog on world geometry without obscuring the shader sky.
+				env->set_fog_sky_affect(0.0f);
 			} else {
 				env->set_fog_enabled(false);
 			}

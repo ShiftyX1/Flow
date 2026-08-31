@@ -980,6 +980,7 @@ void VoxelWorld::_update_chunks(const Vector3 &p_camera_pos) {
 		}
 	}
 	for (int i = 0; i < pending_to_cancel.size(); i++) {
+		// Erasing the TaskID only makes the job invisible; it does not stop a worker from publishing into this world.
 		pending_chunks.erase(pending_to_cancel[i]);
 	}
 
@@ -1093,6 +1094,7 @@ Dictionary VoxelWorld::get_debug_metrics() {
 // Background chunk generation
 void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	ChunkTaskData *data = static_cast<ChunkTaskData *>(p_userdata);
+	// This still reads live world state while shutdown can dismantle it; snapshot the inputs or make the lifetime explicit.
 	VoxelWorld *world = data->world;
 
 	ChunkTaskResult result;
@@ -1678,6 +1680,7 @@ void VoxelWorld::_integrate_finished_chunks() {
 			return;
 		}
 		MutexLock lock(finished_mutex);
+		// This reshuffles the whole queue while workers wait on the same lock. Very democratic, not very timely.
 		Vector<ChunkTaskResult> newly_finished = finished_chunks;
 		finished_chunks.clear();
 		for (int j = p_from_index; j < to_integrate.size(); j++) {

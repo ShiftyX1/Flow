@@ -131,6 +131,7 @@ private:
 	HashSet<Vector2i> dirty_light;
 	// Finished results waiting to be integrated on the main thread.
 	Mutex finished_mutex;
+	// Keep this lock for handoff only; turning result reshuffles into a critical section makes workers part of frame pacing.
 	Vector<ChunkTaskResult> finished_chunks;
 	int last_integrated_load_count = 0;
 	int last_integrated_remesh_count = 0;
@@ -139,6 +140,7 @@ private:
 
 	// Background task entry point (static, thread-safe).
 	struct ChunkTaskData {
+		// This raw owner pointer stays legal only while teardown owns every task; otherwise it is just a delayed use-after-free.
 		VoxelWorld *world;
 		Vector2i key;
 		int chunk_x = 0;

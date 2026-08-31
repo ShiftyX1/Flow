@@ -40,6 +40,7 @@ void initialize_voxel_world_module(ModuleInitializationLevel p_level) {
 
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		// Keep editor registration symmetric with its lifetime; dangling plugin state is a very expensive way to learn reload order.
 		EditorPlugins::add_by_type<VoxelBlockRegistryEditorPlugin>();
 		EditorPlugins::add_by_type<VoxelSceneEditorPlugin>();
 	}

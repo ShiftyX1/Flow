@@ -45,6 +45,7 @@ Ref<Resource> ResourceFormatLoaderVoxelScene::load(const String &p_path, const S
 		}
 		ERR_FAIL_V_MSG(Ref<Resource>(), vformat("Invalid .voxscene magic in: %s", p_path));
 	}
+	// Version zero gets a free pass here even though there is no v0 decoder; old files need a real compatibility path, not wishful fallthrough.
 	uint32_t version = f->get_32();
 	if (version > VOXSCENE_VERSION) {
 		if (r_error) {
@@ -63,6 +64,7 @@ Ref<Resource> ResourceFormatLoaderVoxelScene::load(const String &p_path, const S
 		ERR_FAIL_V_MSG(Ref<Resource>(), vformat("Invalid .voxscene size %dx%dx%d.", sx, sy, sz));
 	}
 
+	// This value comes straight from disk, so put a sane ceiling on it before a broken scene asks the editor to allocate the moon.
 	uint32_t palette_count = f->get_32();
 	Vector<int> palette_remap; // palette index -> block id (== palette index for now; reserved for name-based remap).
 	palette_remap.resize(palette_count);
@@ -82,6 +84,7 @@ Ref<Resource> ResourceFormatLoaderVoxelScene::load(const String &p_path, const S
 	data.instantiate();
 	data->set_size(Vector3i(sx, sy, sz));
 
+	// Multiply this in 64-bit and cap it before narrowing; large dimensions can overflow int and make the validation lie.
 	int total = sx * sy * sz;
 	Vector<uint16_t> &dst = data->get_blocks_array_mutable();
 	if (dst.size() != total) {
@@ -109,6 +112,7 @@ Ref<Resource> ResourceFormatLoaderVoxelScene::load(const String &p_path, const S
 		uint16_t resolved = (palette_count > 0 && block_id < palette_count)
 				? (uint16_t)palette_remap[block_id]
 				: block_id;
+		// Clamping an oversized run makes corrupt RLE look valid. Reject it before touching the destination instead.
 		int end = MIN(written + (int)run, total);
 		for (int i = written; i < end; i++) {
 			w[i] = resolved;

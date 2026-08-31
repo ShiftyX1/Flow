@@ -454,6 +454,7 @@ void VoxelBlockRegistryEditorDialog::_tool_entry_remove_pressed(int p_block_id, 
 	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 	undo_redo->create_action("Remove Tool Entry");
 	undo_redo->add_do_method(registry.ptr(), "remove_block_tool_entry", p_block_id, p_entry_idx);
+	// Undo needs the original slot too; appending it back makes history look correct right up until order matters.
 	undo_redo->add_undo_method(registry.ptr(), "add_block_tool_entry", p_block_id,
 			StringName(String(entry_data["tool_type"])), (int)entry_data["min_tier"], (float)entry_data["break_time"]);
 	undo_redo->commit_action();
@@ -527,6 +528,7 @@ void VoxelBlockRegistryEditorDialog::_rebuild_block_list() {
 		return;
 	}
 
+	// Rebuilding the inspector should not quietly rewrite the resource; setup_defaults() needs an explicit UndoRedo boundary.
 	// Ensure all engine-defined block types have entries in the registry.
 	// Always call setup_defaults() — it merges names and physics/lighting
 	// defaults into existing entries without overwriting textures from .tscn.

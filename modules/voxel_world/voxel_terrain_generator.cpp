@@ -308,6 +308,7 @@ BiomeParams VoxelTerrainGenerator::_get_blended_params(const float *p_weights, i
 
 	int dominant = 0;
 	for (int i = 0; i < p_biome_count; i++) {
+		// This runs for every generated column; do not copy the feature payload just to blend scalars. Keep a reference and copy the dominant biome once.
 		BiomeParams bp = _get_biome_params_at(i);
 		result.height_base += bp.height_base * p_weights[i];
 		result.height_scale += bp.height_scale * p_weights[i];

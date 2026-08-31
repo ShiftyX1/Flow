@@ -46,6 +46,7 @@ Error VoxelWorldSave::save_chunk_file(const String &p_path, const Vector<uint16_
 	Error err = DirAccess::make_dir_recursive_absolute(p_path.get_base_dir());
 	ERR_FAIL_COND_V(err != OK, err);
 
+	// Writing the live chunk in place is atomic right up to the crash between RLE runs; stage it in a temp file and rename after the payload lands.
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::WRITE, &err);
 	ERR_FAIL_COND_V_MSG(f.is_null(), err, vformat("VoxelWorldSave: cannot open chunk for write: %s", p_path));
 
@@ -100,6 +101,7 @@ Error VoxelWorldSave::load_chunk_objects_file(const String &p_path, Array *r_obj
 	err = config->load(p_path);
 	ERR_FAIL_COND_V_MSG(err != OK, err, vformat("VoxelWorldSave: failed to load chunk objects: %s", p_path));
 
+	// A damaged count should not quietly turn missing entries into empty objects; bound it and reject records that are not actually there.
 	const int count = (int)config->get_value("objects", "count", 0);
 	r_objects->clear();
 	for (int i = 0; i < count; i++) {
@@ -132,6 +134,7 @@ Error VoxelWorldSave::load_chunk_file(const String &p_path, Vector<uint16_t> *r_
 			ERR_FILE_CORRUPT, vformat("VoxelWorldSave: invalid chunk size %dx%dx%d.", sx, sy, sz));
 
 	const int total = sx * sy * sz;
+	// Do not hand partial RLE output back to the caller when decode fails halfway through; fill a temporary vector and publish it on success.
 	r_blocks->resize(total);
 	uint16_t *w = r_blocks->ptrw();
 	int written = 0;

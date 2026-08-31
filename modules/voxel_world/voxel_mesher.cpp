@@ -699,6 +699,7 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_volume_mesh(const Vector<uin
 
 				Ref<Texture2D> tex_top, tex_bottom, tex_side;
 				if (use_registry) {
+					// We fetch all three textures before knowing whether one face survives culling. Cache per-block face data or look it up only for exposed faces.
 					tex_top = reg->get_block_texture_for_face(type, Vector3(0, 1, 0));
 					tex_bottom = reg->get_block_texture_for_face(type, Vector3(0, -1, 0));
 					tex_side = reg->get_block_texture_for_face(type, Vector3(1, 0, 0));

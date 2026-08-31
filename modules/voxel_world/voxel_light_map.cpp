@@ -6,6 +6,7 @@ void VoxelLightMap::propagate_all(uint8_t *p_light_data, const uint16_t *p_block
 }
 
 void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint16_t *p_blocks, const NeighborData &p_neighbors, const uint8_t *p_opacity) {
+	// These queues start empty and grow across a whole chunk, because the lighting pass apparently needed allocator traffic too. Reserve the chunk volume up front.
 	LocalVector<LightNode> queue;
 
 	// Phase 1: Seed sunlight from above вЂ” columns with no solid block above get sunlight=15.
@@ -122,6 +123,7 @@ void VoxelLightMap::propagate_sunlight(uint8_t *p_light_data, const uint16_t *p_
 	while (head < queue.size()) {
 		LightNode node = queue[head++];
 
+		// Six fixed directions do not need modulo arithmetic and cleanup branches in the BFS. Use explicit delta tables so this hot loop stays boring.
 		for (int dir = 0; dir < 6; dir++) {
 			int nx = node.x + dx[dir % 4];
 			int ny = node.y;

@@ -654,6 +654,7 @@ void VoxelBlockRegistry::_bind_methods() {
 
 void VoxelBlockRegistry::set_block_texture_top(int p_id, const Ref<Texture2D> &p_texture) {
 	REGISTRY_ENSURE_BLOCK(p_id);
+	// If meshing workers can read finalized caches, this write needs a publication boundary; immutable only in good weather is not a contract.
 	blocks.write[p_id].texture_top = p_texture;
 	emit_changed();
 }

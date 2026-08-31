@@ -144,6 +144,7 @@ void VoxelSceneToolbar::_notification(int p_what) {
 }
 
 void VoxelSceneToolbar::_on_tool_pressed(int p_tool) {
+	// Switching tools must also retire any multi-click state, or Box Fill gets to reuse an anchor from a different tool.
 	current_tool = (Tool)p_tool;
 	for (int i = 0; i < TOOL_MAX; i++) {
 		if (tool_buttons[i]) {
@@ -643,6 +644,7 @@ void VoxelSceneEditorPlugin::_apply_box(const Vector3i &p_a, const Vector3i &p_b
 		}
 	}
 	PackedByteArray after = data->get_blocks_packed();
+	// Do not put identical snapshots on UndoRedo; a no-op box edit is still noise once the history grows.
 	// Restore so undo->redo cycle is consistent (we register set_blocks_packed for both directions).
 	data->set_blocks_packed(before);
 

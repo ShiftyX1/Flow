@@ -1,1 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><g fill="#fff"><path d="M105 673v33q407 354 814 0v-33z"/><path fill="#478cbf" d="m105 673 152 14q12 1 15 14l4 67 132 10 8-61q2-11 15-15h162q13 4 15 15l8 61 132-10 4-67q3-13 15-14l152-14V427q30-39 56-81-35-59-83-108-43 20-82 47-40-37-88-64 7-51 8-102-59-28-123-42-26 43-46 89-49-7-98 0-20-46-46-89-64 14-123 42 1 51 8 102-48 27-88 64-39-27-82-47-48 49-83 108 26 42 56 81zm0 33v39c0 276 813 276 814 0v-39l-134 12-5 69q-2 10-14 13l-162 11q-12 0-16-11l-10-65H446l-10 65q-4 11-16 11l-162-11q-12-3-14-13l-5-69z"/><path d="M483 600c0 34 58 34 58 0v-86c0-34-58-34-58 0z"/><circle cx="725" cy="526" r="90"/><circle cx="299" cy="526" r="90"/></g><g fill="#414042"><circle cx="307" cy="532" r="60"/><circle cx="717" cy="532" r="60"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-labelledby="title desc" color="#000">
+  <title id="title">Flow game engine logo</title>
+  <desc id="desc">Minimal geometric Flow logo with a flowing F-shaped mark and custom vector wordmark.</desc>
+
+  <!-- Change the `color` attribute on <svg> to recolor the entire logo. -->
+  <g fill="currentColor">
+    <!-- Flow mark -->
+    <g id="mark">
+      <path d="M356 371 392 284c29-70 93-112 171-112h344l-18 50c-14 39-49 61-93 61H570c-61 0-113 24-153 68l-18 20Z"/>
+      <path d="M292 596 337 485c35-86 113-140 210-140h292l-18 51c-14 40-49 62-94 62H571c-65 0-116 29-143 86l-24 52Z"/>
+    </g>
+
+    <!-- Custom wordmark: no font dependency -->
+    <g id="wordmark" transform="translate(0 4)">
+      <!-- F -->
+      <path d="M213 650h174v38H253v52h121v38H253v92h-40Z"/>
+
+      <!-- l -->
+      <path d="M414 650h40v220h-40Z"/>
+
+      <!-- o -->
+      <path fill-rule="evenodd" d="M500 787a82 70 0 1 0 164 0 82 70 0 1 0-164 0Zm40 0a42 35 0 1 1 84 0 42 35 0 1 1-84 0Z"/>
+
+      <!-- w -->
+      <path d="M690 704h43l37 111 42-111h37l42 111 37-111h43l-58 166h-43l-40-103-40 103h-43Z"/>
+    </g>
+  </g>
+</svg>

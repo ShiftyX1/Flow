@@ -92,11 +92,14 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_block_at", "world_pos"), &VoxelWorld::get_block_at);
 	ClassDB::bind_method(D_METHOD("set_block_at", "world_pos", "block_id"), &VoxelWorld::set_block_at);
 	ClassDB::bind_method(D_METHOD("get_block_name_at", "world_pos"), &VoxelWorld::get_block_name_at);
+	ClassDB::bind_method(D_METHOD("get_surface_y_at", "world_x", "world_z"), &VoxelWorld::get_surface_y_at);
 	ClassDB::bind_method(D_METHOD("get_biome_at", "world_pos"), &VoxelWorld::get_biome_at);
 	ClassDB::bind_method(D_METHOD("get_biome_name_at", "world_pos"), &VoxelWorld::get_biome_name_at);
 	ClassDB::bind_method(D_METHOD("add_world_object", "type", "block_pos", "rotation_y", "state", "blocking"), &VoxelWorld::add_world_object, DEFVAL(0.0f), DEFVAL(Dictionary()), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("remove_world_object", "id"), &VoxelWorld::remove_world_object);
 	ClassDB::bind_method(D_METHOD("get_world_object", "id"), &VoxelWorld::get_world_object);
+	ClassDB::bind_method(D_METHOD("get_world_object_at", "block_pos"), &VoxelWorld::get_world_object_at);
+	ClassDB::bind_method(D_METHOD("get_all_world_objects"), &VoxelWorld::get_all_world_objects);
 	ClassDB::bind_method(D_METHOD("set_world_object_state", "id", "state"), &VoxelWorld::set_world_object_state);
 	ClassDB::bind_method(D_METHOD("set_world_object_blocking", "id", "blocking"), &VoxelWorld::set_world_object_blocking);
 	ClassDB::bind_method(D_METHOD("get_world_objects_in_chunk", "chunk_pos"), &VoxelWorld::get_world_objects_in_chunk);
@@ -178,6 +181,8 @@ void VoxelWorld::_bind_methods() {
 	BIND_CONSTANT(VOXEL_BLOCK_BIO_RESIN);
 	BIND_CONSTANT(VOXEL_BLOCK_RUSTED_PANEL);
 	BIND_CONSTANT(VOXEL_BLOCK_BEACON_CORE);
+	BIND_CONSTANT(VOXEL_BLOCK_IRON_ORE);
+	BIND_CONSTANT(VOXEL_BLOCK_COPPER_ORE);
 }
 
 VoxelWorld::VoxelWorld() {
@@ -1965,7 +1970,7 @@ void VoxelWorld::_unload_chunk(int p_cx, int p_cz) {
 Dictionary VoxelWorld::_build_world_save_metadata(const String &p_display_name, int p_resolved_seed, const Dictionary &p_player_state, const Dictionary &p_character_state) const {
 	const double now = Time::get_singleton()->get_unix_time_from_system();
 	Dictionary metadata;
-	metadata["schema_version"] = 1;
+	metadata["schema_version"] = VOXEL_WORLD_SAVE_SCHEMA_VERSION;
 	metadata["display_name"] = p_display_name.is_empty() ? String("New World") : p_display_name;
 	metadata["seed"] = p_resolved_seed;
 	metadata["world_time"] = time_of_day;
@@ -1987,7 +1992,7 @@ Error VoxelWorld::_load_world_save_metadata(const String &p_save_dir) {
 	ERR_FAIL_COND_V_MSG(err != OK, err, vformat("VoxelWorld: failed to load save metadata: %s", metadata_path));
 
 	const int schema_version = (int)config->get_value("world", "schema_version", 0);
-	ERR_FAIL_COND_V_MSG(schema_version != 1, ERR_FILE_UNRECOGNIZED, vformat("VoxelWorld: unsupported save schema version %d.", schema_version));
+	ERR_FAIL_COND_V_MSG(schema_version != VOXEL_WORLD_SAVE_SCHEMA_VERSION, ERR_FILE_UNRECOGNIZED, vformat("VoxelWorld: unsupported save schema version %d.", schema_version));
 
 	world_save_metadata.clear();
 	world_save_metadata["schema_version"] = schema_version;
@@ -2023,7 +2028,7 @@ Error VoxelWorld::_write_world_save_metadata() {
 	const String tmp_path = metadata_path + ".tmp";
 	Ref<ConfigFile> config;
 	config.instantiate();
-	config->set_value("world", "schema_version", (int)world_save_metadata.get("schema_version", 1));
+	config->set_value("world", "schema_version", (int)world_save_metadata.get("schema_version", VOXEL_WORLD_SAVE_SCHEMA_VERSION));
 	config->set_value("world", "slot_id", world_save_metadata.get("slot_id", String()));
 	config->set_value("world", "display_name", world_save_metadata.get("display_name", String("New World")));
 	config->set_value("world", "seed", (int)world_save_metadata.get("seed", seed));
@@ -2450,6 +2455,10 @@ int64_t VoxelWorld::add_world_object(const StringName &p_type, const Vector3i &p
 }
 
 bool VoxelWorld::remove_world_object(int64_t p_id) {
+	const WorldObjectEntry *object = world_objects.getptr(p_id);
+	if (object == nullptr || (bool)object->state.get("permanent", false)) {
+		return false;
+	}
 	return _remove_world_object_internal(p_id, true, true);
 }
 
@@ -2461,16 +2470,42 @@ Dictionary VoxelWorld::get_world_object(int64_t p_id) const {
 	return _world_object_to_dictionary(*object);
 }
 
+Dictionary VoxelWorld::get_world_object_at(const Vector3i &p_block_pos) const {
+	const Vector<int64_t> *ids = object_ids_by_chunk.getptr(_block_to_chunk(p_block_pos));
+	if (ids == nullptr) {
+		return Dictionary();
+	}
+	for (int i = 0; i < ids->size(); i++) {
+		const WorldObjectEntry *object = world_objects.getptr((*ids)[i]);
+		if (object != nullptr && object->block_pos == p_block_pos) {
+			return _world_object_to_dictionary(*object);
+		}
+	}
+	return Dictionary();
+}
+
+Array VoxelWorld::get_all_world_objects() const {
+	Array objects;
+	for (const KeyValue<int64_t, WorldObjectEntry> &entry : world_objects) {
+		objects.push_back(_world_object_to_dictionary(entry.value));
+	}
+	return objects;
+}
+
 bool VoxelWorld::set_world_object_state(int64_t p_id, const Dictionary &p_state) {
 	WorldObjectEntry *object = world_objects.getptr(p_id);
 	if (object == nullptr) {
 		return false;
 	}
-	object->state = p_state;
+	Dictionary next_state = p_state.duplicate(true);
+	if ((bool)object->state.get("permanent", false)) {
+		next_state["permanent"] = true;
+	}
+	object->state = next_state;
 	if (world_save_loaded) {
 		dirty_saved_object_chunks.insert(_block_to_chunk(object->block_pos));
 	}
-	emit_signal("world_object_state_changed", p_id, p_state);
+	emit_signal("world_object_state_changed", p_id, next_state);
 	_refresh_block_model_animations_near_object(*object);
 	return true;
 }
@@ -2768,6 +2803,10 @@ void VoxelWorld::set_block_at(const Vector3 &p_world_pos, int p_block_id) {
 String VoxelWorld::get_block_name_at(const Vector3 &p_world_pos) const {
 	int block_id = get_block_at(p_world_pos);
 	return block_registry.is_valid() ? block_registry->get_block_name(block_id) : String();
+}
+
+int VoxelWorld::get_surface_y_at(int p_world_x, int p_world_z) const {
+	return generator != nullptr ? generator->get_surface_y_at(p_world_x, p_world_z) : sea_level;
 }
 
 int VoxelWorld::get_biome_at(const Vector3 &p_world_pos) const {

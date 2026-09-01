@@ -36,6 +36,8 @@ static constexpr int VOXEL_BLOCK_BIOLUMEN_PLANT = 11;
 static constexpr int VOXEL_BLOCK_BIO_RESIN = 12;
 static constexpr int VOXEL_BLOCK_RUSTED_PANEL = 13;
 static constexpr int VOXEL_BLOCK_BEACON_CORE = 14;
+static constexpr int VOXEL_BLOCK_IRON_ORE = 15;
+static constexpr int VOXEL_BLOCK_COPPER_ORE = 16;
 
 // Dynamic block registry: single source of truth for all block definitions.
 // Blocks are registered at startup, then finalize() builds flat cache arrays
@@ -279,7 +281,7 @@ public:
 	void create_block(int p_id);
 	void remove_block(int p_id);
 
-	// Populate with 11 built-in block types (air, grass, dirt, stone, sand, water, snow, wood, leaves, bedrock, torch).
+	// Populate the built-in MVP block types.
 	void setup_defaults();
 
 	// --- Fast inline cache accessors (safe after finalize(), thread-safe) ---

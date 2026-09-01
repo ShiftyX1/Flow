@@ -1248,6 +1248,28 @@ void VoxelBlockRegistry::setup_defaults() {
 	beacon_core_tags.push_back("interactable_anchor");
 	d["tags"] = beacon_core_tags;
 	reg("beacon_core", 14, d);
+
+	// 15: IRON ORE
+	d.clear();
+	d["color"] = Color(0.48f, 0.42f, 0.38f);
+	d["resource_id"] = "iron_ore";
+	d["hand_break_time"] = 7.0f;
+	PackedStringArray iron_ore_tags;
+	iron_ore_tags.push_back("ore");
+	iron_ore_tags.push_back("metal");
+	d["tags"] = iron_ore_tags;
+	reg("iron_ore", 15, d);
+
+	// 16: COPPER ORE
+	d.clear();
+	d["color"] = Color(0.62f, 0.36f, 0.24f);
+	d["resource_id"] = "copper_ore";
+	d["hand_break_time"] = 6.5f;
+	PackedStringArray copper_ore_tags;
+	copper_ore_tags.push_back("ore");
+	copper_ore_tags.push_back("metal");
+	d["tags"] = copper_ore_tags;
+	reg("copper_ore", 16, d);
 }
 
 // --- Mining / survival implementations ---

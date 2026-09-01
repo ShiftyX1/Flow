@@ -127,6 +127,21 @@ VoxelTerrainGenerator::VoxelTerrainGenerator() {
 	humidity_noise->set_fractal_octaves(3);
 	humidity_noise->set_fractal_lacunarity(2.0f);
 	humidity_noise->set_fractal_gain(0.5f);
+
+	// --- Underground ore fields: continuous 3D clusters, sampled in world coordinates. ---
+	iron_ore_noise.instantiate();
+	iron_ore_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
+	iron_ore_noise->set_frequency(0.075f);
+	iron_ore_noise->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
+	iron_ore_noise->set_fractal_octaves(2);
+	iron_ore_noise->set_fractal_gain(0.55f);
+
+	copper_ore_noise.instantiate();
+	copper_ore_noise->set_noise_type(FastNoiseLite::TYPE_SIMPLEX_SMOOTH);
+	copper_ore_noise->set_frequency(0.065f);
+	copper_ore_noise->set_fractal_type(FastNoiseLite::FRACTAL_FBM);
+	copper_ore_noise->set_fractal_octaves(2);
+	copper_ore_noise->set_fractal_gain(0.55f);
 }
 
 VoxelTerrainGenerator::~VoxelTerrainGenerator() {
@@ -146,6 +161,8 @@ void VoxelTerrainGenerator::set_seed(int p_seed) {
 	lake_noise->set_seed(p_seed + 500);
 	temperature_noise->set_seed(p_seed + 600);
 	humidity_noise->set_seed(p_seed + 700);
+	iron_ore_noise->set_seed(p_seed + 800);
+	copper_ore_noise->set_seed(p_seed + 900);
 }
 
 int VoxelTerrainGenerator::get_biome_index_at(int p_world_x, int p_world_z) const {
@@ -912,7 +929,29 @@ Vector<uint16_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p
 		}
 	}
 
-	// --- Pass 4: Feature generation (biome-aware: trees, scatter, etc.) ---
+	// --- Pass 4: Underground ore veins ---
+	// Ore replaces only surviving stone, so caves, water, air, and bedrock are never filled.
+	for (int x = 0; x < CHUNK_SIZE_X; x++) {
+		for (int z = 0; z < CHUNK_SIZE_Z; z++) {
+			const int wx = world_x_start + x;
+			const int wz = world_z_start + z;
+			for (int y = 1; y <= COPPER_ORE_MAX_Y; y++) {
+				const int idx = block_index(x, y, z);
+				if (blocks_w[idx] != VOXEL_BLOCK_STONE) {
+					continue;
+				}
+				const float iron_value = y >= IRON_ORE_MIN_Y && y <= IRON_ORE_MAX_Y ? Math::abs(iron_ore_noise->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz)) : 0.0f;
+				const float copper_value = y >= COPPER_ORE_MIN_Y ? Math::abs(copper_ore_noise->get_noise_3d((real_t)wx, (real_t)y, (real_t)wz)) : 0.0f;
+				if (iron_value >= IRON_ORE_THRESHOLD && iron_value >= copper_value) {
+					blocks_w[idx] = VOXEL_BLOCK_IRON_ORE;
+				} else if (copper_value >= COPPER_ORE_THRESHOLD) {
+					blocks_w[idx] = VOXEL_BLOCK_COPPER_ORE;
+				}
+			}
+		}
+	}
+
+	// --- Pass 5: Feature generation (biome-aware: trees, scatter, etc.) ---
 	int border = TREE_CHECK_BORDER;
 	for (int wx = world_x_start - border; wx < world_x_start + CHUNK_SIZE_X + border; wx++) {
 		for (int wz = world_z_start - border; wz < world_z_start + CHUNK_SIZE_Z + border; wz++) {

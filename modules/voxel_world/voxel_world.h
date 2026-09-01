@@ -20,6 +20,8 @@
 #include "scene/resources/environment.h"
 #include "scene/resources/material.h"
 
+static constexpr int VOXEL_WORLD_SAVE_SCHEMA_VERSION = 2;
+
 class AnimationPlayer;
 
 class VoxelWorld : public Node3D {
@@ -337,6 +339,8 @@ public:
 
 	// Get block name by world position.
 	String get_block_name_at(const Vector3 &p_world_pos) const;
+	// Get generated surface height at block-grid X/Z. Falls back to sea level before initialization.
+	int get_surface_y_at(int p_world_x, int p_world_z) const;
 
 	// Get biome index (dominant biome) at a world position. Returns -1 before world is initialized.
 	int get_biome_at(const Vector3 &p_world_pos) const;
@@ -346,6 +350,8 @@ public:
 	int64_t add_world_object(const StringName &p_type, const Vector3i &p_block_pos, float p_rotation_y = 0.0f, const Dictionary &p_state = Dictionary(), bool p_blocking = false);
 	bool remove_world_object(int64_t p_id);
 	Dictionary get_world_object(int64_t p_id) const;
+	Dictionary get_world_object_at(const Vector3i &p_block_pos) const;
+	Array get_all_world_objects() const;
 	bool set_world_object_state(int64_t p_id, const Dictionary &p_state);
 	bool set_world_object_blocking(int64_t p_id, bool p_blocking);
 	Array get_world_objects_in_chunk(const Vector2i &p_chunk_pos) const;

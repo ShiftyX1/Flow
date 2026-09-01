@@ -159,17 +159,91 @@ TEST_CASE("[VoxelWorld] Default content slice exposes restored forest beacon dat
 	Ref<VoxelStructureRegistry> structures;
 	structures.instantiate();
 	structures->setup_defaults();
-	REQUIRE(structures->get_structure_count() == 1);
+	REQUIRE(structures->get_structure_count() == 2);
 
 	Dictionary beacon = structures->get_structure(0);
 	CHECK(String(beacon["name"]) == "restored_forest_emergency_beacon");
 	CHECK(String(beacon["world_object_type"]) == "emergency_beacon");
-	CHECK((bool)((Dictionary)beacon["world_object_state"])["active"]);
+	Dictionary beacon_state = beacon["world_object_state"];
+	CHECK(!(bool)beacon_state["active"]);
+	CHECK((bool)beacon_state["locked"]);
+	CHECK(String(beacon_state["activation_item_id"]) == "beacon_repair_core");
 
 	Ref<VoxelSceneData> data = beacon["voxel_data"];
 	REQUIRE(data.is_valid());
 	CHECK(data->get_block(3, 1, 3) == VOXEL_BLOCK_BEACON_CORE);
 	CHECK(data->get_block_count_non_air() > 0);
+
+	Dictionary archive = structures->get_structure(1);
+	CHECK(String(archive["name"]) == "old_world_fabricator_archive");
+	CHECK(String(archive["world_object_type"]) == "technology_archive");
+	Dictionary archive_state = archive["world_object_state"];
+	CHECK(String(archive_state["schematic_recipe_id"]) == "craft_fabricator");
+	CHECK(!(bool)archive_state["claimed"]);
+}
+
+TEST_CASE("[VoxelWorld] Default block registry exposes iron and copper ore resources") {
+	Ref<VoxelBlockRegistry> blocks;
+	blocks.instantiate();
+	blocks->setup_defaults();
+
+	CHECK(blocks->get_block_name(VOXEL_BLOCK_IRON_ORE) == String("iron_ore"));
+	CHECK(blocks->get_block_resource_id(VOXEL_BLOCK_IRON_ORE) == StringName("iron_ore"));
+	CHECK(blocks->block_has_tag(VOXEL_BLOCK_IRON_ORE, "ore"));
+	CHECK(blocks->get_block_name(VOXEL_BLOCK_COPPER_ORE) == String("copper_ore"));
+	CHECK(blocks->get_block_resource_id(VOXEL_BLOCK_COPPER_ORE) == StringName("copper_ore"));
+	CHECK(blocks->block_has_tag(VOXEL_BLOCK_COPPER_ORE, "ore"));
+}
+
+TEST_CASE("[VoxelWorld] Underground ore veins are deterministic and seed-dependent") {
+	static constexpr int TEST_WORLD_SEED = 424242;
+	VoxelTerrainGenerator first;
+	first.setup_default_biomes();
+	first.set_seed(TEST_WORLD_SEED);
+	VoxelTerrainGenerator same;
+	same.setup_default_biomes();
+	same.set_seed(TEST_WORLD_SEED);
+	VoxelTerrainGenerator different;
+	different.setup_default_biomes();
+	different.set_seed(TEST_WORLD_SEED + 1);
+
+	int first_ore_count = 0;
+	int different_ore_count = 0;
+	bool seed_changed_layout = false;
+	for (int chunk_x = -1; chunk_x <= 1; chunk_x++) {
+		for (int chunk_z = -1; chunk_z <= 1; chunk_z++) {
+			Vector<uint16_t> first_data = first.generate_chunk_data(chunk_x, chunk_z);
+			Vector<uint16_t> repeated_data = same.generate_chunk_data(chunk_x, chunk_z);
+			Vector<uint16_t> different_data = different.generate_chunk_data(chunk_x, chunk_z);
+			REQUIRE(first_data.size() == repeated_data.size());
+			REQUIRE(first_data.size() == different_data.size());
+			for (int y = 0; y < VoxelTerrainGenerator::CHUNK_SIZE_Y; y++) {
+				for (int z = 0; z < VoxelTerrainGenerator::CHUNK_SIZE_Z; z++) {
+					for (int x = 0; x < VoxelTerrainGenerator::CHUNK_SIZE_X; x++) {
+						const int index = VoxelTerrainGenerator::block_index(x, y, z);
+						CHECK(first_data[index] == repeated_data[index]);
+						const bool first_is_ore = first_data[index] == VOXEL_BLOCK_IRON_ORE || first_data[index] == VOXEL_BLOCK_COPPER_ORE;
+						const bool different_is_ore = different_data[index] == VOXEL_BLOCK_IRON_ORE || different_data[index] == VOXEL_BLOCK_COPPER_ORE;
+						if (first_is_ore) {
+							first_ore_count++;
+							CHECK(y > 0);
+							CHECK(y <= VoxelTerrainGenerator::COPPER_ORE_MAX_Y);
+						}
+						if (different_is_ore) {
+							different_ore_count++;
+						}
+						if (first_is_ore != different_is_ore || (first_is_ore && first_data[index] != different_data[index])) {
+							seed_changed_layout = true;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	CHECK(first_ore_count > 0);
+	CHECK(different_ore_count > 0);
+	CHECK(seed_changed_layout);
 }
 
 TEST_CASE("[VoxelWorld] Chunk object save round-trip") {
@@ -224,6 +298,42 @@ TEST_CASE("[VoxelWorld] Blocking world objects participate in body movement") {
 
 	CHECK(Math::is_equal_approx(position.x, 1.0f));
 	CHECK(Math::is_equal_approx(velocity.x, 1.0f));
+}
+
+TEST_CASE("[VoxelWorld] Permanent world objects reject public removal") {
+	VoxelWorld world;
+
+	Dictionary permanent_state;
+	permanent_state["permanent"] = true;
+	const int64_t permanent_id = world.add_world_object(StringName("landing_module"), Vector3i(0, 53, 0), 0.0f, permanent_state, true);
+	const int64_t temporary_id = world.add_world_object(StringName("temporary_crate"), Vector3i(2, 53, 0));
+
+	CHECK(!world.remove_world_object(permanent_id));
+	CHECK(!world.get_world_object(permanent_id).is_empty());
+	CHECK(world.set_world_object_state(permanent_id, Dictionary()));
+	CHECK((bool)((Dictionary)world.get_world_object(permanent_id)["state"])["permanent"]);
+	CHECK(!world.remove_world_object(permanent_id));
+
+	CHECK(world.remove_world_object(temporary_id));
+	CHECK(world.get_world_object(temporary_id).is_empty());
+}
+
+TEST_CASE("[VoxelWorld] World objects can be queried by exact block position") {
+	VoxelWorld world;
+	const int64_t first_id = world.add_world_object(StringName("power_cable"), Vector3i(-1, 53, 2));
+	const int64_t second_id = world.add_world_object(StringName("storage"), Vector3i(17, 53, 2));
+
+	CHECK((int64_t)world.get_world_object_at(Vector3i(-1, 53, 2))["id"] == first_id);
+	CHECK((int64_t)world.get_world_object_at(Vector3i(17, 53, 2))["id"] == second_id);
+	CHECK(world.get_world_object_at(Vector3i(0, 53, 2)).is_empty());
+	CHECK(world.get_all_world_objects().size() == 2);
+}
+
+TEST_CASE("[VoxelWorld] Surface query has a deterministic pre-initialization fallback") {
+	VoxelWorld world;
+	world.set_sea_level(61);
+
+	CHECK(world.get_surface_y_at(12, -8) == 61);
 }
 
 TEST_CASE("[VoxelWorld] Corrupt chunk RLE is rejected") {
@@ -317,7 +427,7 @@ TEST_CASE("[VoxelWorld] Loaded save time becomes current and start time") {
 
 	Ref<ConfigFile> config;
 	config.instantiate();
-	config->set_value("world", "schema_version", 1);
+	config->set_value("world", "schema_version", 2);
 	config->set_value("world", "slot_id", root.get_file());
 	config->set_value("world", "display_name", "Time Test");
 	config->set_value("world", "seed", 1234);
@@ -334,6 +444,32 @@ TEST_CASE("[VoxelWorld] Loaded save time becomes current and start time") {
 	CHECK(world.load_world_save(root) == OK);
 	CHECK(Math::is_equal_approx(world.get_time_of_day(), 18.25f));
 	CHECK(Math::is_equal_approx(world.get_start_time_of_day(), 18.25f));
+
+	DirAccess::remove_absolute(metadata_path);
+}
+
+TEST_CASE("[VoxelWorld] Save schema v2 rejects v1 without mutation") {
+	const String root = "user://voxel_world_incompatible_v1_test";
+	const String metadata_path = VoxelWorldSave::get_metadata_path(root);
+	CHECK(VoxelWorldSave::ensure_save_dirs(root) == OK);
+
+	Ref<ConfigFile> config;
+	config.instantiate();
+	config->set_value("world", "schema_version", 1);
+	config->set_value("world", "slot_id", root.get_file());
+	config->set_value("world", "display_name", "Legacy World");
+	config->set_value("world", "seed", 1234);
+	config->set_value("world", "legacy_marker", "preserve-me");
+	CHECK(config->save(metadata_path) == OK);
+
+	VoxelWorld world;
+	CHECK(world.load_world_save(root) == ERR_FILE_UNRECOGNIZED);
+
+	Ref<ConfigFile> after;
+	after.instantiate();
+	CHECK(after->load(metadata_path) == OK);
+	CHECK((int)after->get_value("world", "schema_version", -1) == 1);
+	CHECK(String(after->get_value("world", "legacy_marker", String())) == "preserve-me");
 
 	DirAccess::remove_absolute(metadata_path);
 }

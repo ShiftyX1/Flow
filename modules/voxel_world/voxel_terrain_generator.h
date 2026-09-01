@@ -66,6 +66,12 @@ public:
 	// Minimum dominant-biome weight to stay in pure-biome mode (no block dithering).
 	// Below this threshold (genuine transition zone) probabilistic mixing is applied.
 	static constexpr float BIOME_DITHER_THRESHOLD = 0.30f;
+	static constexpr int IRON_ORE_MIN_Y = 4;
+	static constexpr int IRON_ORE_MAX_Y = 48;
+	static constexpr int COPPER_ORE_MIN_Y = 8;
+	static constexpr int COPPER_ORE_MAX_Y = 64;
+	static constexpr float IRON_ORE_THRESHOLD = 0.52f;
+	static constexpr float COPPER_ORE_THRESHOLD = 0.54f;
 
 	// Tree generation border for cross-chunk canopy.
 	static const int TREE_CHECK_BORDER = 4;
@@ -98,6 +104,8 @@ private:
 	// Biome noise layers — very low frequency for large biome regions.
 	Ref<FastNoiseLite> temperature_noise;
 	Ref<FastNoiseLite> humidity_noise;
+	Ref<FastNoiseLite> iron_ore_noise;
+	Ref<FastNoiseLite> copper_ore_noise;
 
 	int seed = 0;
 	int sea_level = 52;

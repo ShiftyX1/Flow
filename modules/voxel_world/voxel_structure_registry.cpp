@@ -194,8 +194,22 @@ void VoxelStructureRegistry::setup_defaults() {
 	rotations.push_back(270);
 
 	Dictionary state;
-	state["active"] = true;
-	state["locked"] = false;
+	state["active"] = false;
+	state["locked"] = true;
+	state["activation_item_id"] = "beacon_repair_core";
+	state["functional_kind"] = "generator";
+	state["renewable_generator"] = true;
+	state["power_output"] = 20.0;
+	state["powered"] = false;
+	Array inventory_slots;
+	for (int slot_index = 0; slot_index < 9; slot_index++) {
+		inventory_slots.push_back(Dictionary());
+	}
+	state["inventory_slots"] = inventory_slots;
+	state["production_elapsed_seconds"] = 0.0;
+	state["production_interval_seconds"] = 30.0;
+	state["fast_travel_enabled"] = false;
+	state["sector_restoration_enabled"] = false;
 	state["signal"] = "distress";
 	state["archive_hint"] = "restored_forest_entry";
 
@@ -210,6 +224,40 @@ void VoxelStructureRegistry::setup_defaults() {
 	props["world_object_state"] = state;
 	props["world_object_blocking"] = false;
 	add_structure("restored_forest_emergency_beacon", props);
+
+	Ref<VoxelSceneData> archive;
+	archive.instantiate();
+	archive->set_size(Vector3i(5, 3, 5));
+	archive->clear();
+	for (int x = 0; x < 5; x++) {
+		for (int z = 0; z < 5; z++) {
+			if (x == 0 || x == 4 || z == 0 || z == 4 || ((x + z) % 4 == 0)) {
+				archive->set_block(x, 0, z, VOXEL_BLOCK_STONE);
+			}
+		}
+	}
+	archive->set_block(1, 1, 0, VOXEL_BLOCK_RUSTED_PANEL);
+	archive->set_block(3, 1, 0, VOXEL_BLOCK_RUSTED_PANEL);
+	archive->set_block(0, 1, 3, VOXEL_BLOCK_RUSTED_PANEL);
+	archive->set_block(4, 1, 1, VOXEL_BLOCK_RUSTED_PANEL);
+	archive->set_block(2, 1, 2, VOXEL_BLOCK_BEACON_CORE);
+
+	Dictionary archive_state;
+	archive_state["schematic_recipe_id"] = "craft_fabricator";
+	archive_state["claimed"] = false;
+	archive_state["archive_kind"] = "human_technology";
+
+	Dictionary archive_props;
+	archive_props["voxel_data"] = archive;
+	archive_props["rarity"] = 23;
+	archive_props["biome_tags"] = biome_tags;
+	archive_props["layer_tags"] = layer_tags;
+	archive_props["anchor"] = Vector3i(2, 1, 2);
+	archive_props["allowed_rotations"] = rotations;
+	archive_props["world_object_type"] = "technology_archive";
+	archive_props["world_object_state"] = archive_state;
+	archive_props["world_object_blocking"] = false;
+	add_structure("old_world_fabricator_archive", archive_props);
 }
 
 int VoxelStructureRegistry::get_structure_count() const {

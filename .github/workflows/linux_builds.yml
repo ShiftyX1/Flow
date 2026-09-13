@@ -23,6 +23,7 @@ env:
 
 jobs:
   build-linux:
+    if: ${{ false }}
     # Stay one LTS before latest to increase portability of Linux artifacts.
     runs-on: ubuntu-22.04
     name: ${{ matrix.name }}

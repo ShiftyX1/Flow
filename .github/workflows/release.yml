@@ -23,24 +23,29 @@ jobs:
   # ── Build all platforms ─────────────────────────────────────────────
 
   windows-build:
+    if: ${{ false }}
     name: 🏁 Windows
     uses: ./.github/workflows/windows_builds.yml
 
   linux-build:
+    if: ${{ false }}
     name: 🐧 Linux
     uses: ./.github/workflows/linux_builds.yml
 
   macos-build:
+    if: ${{ false }}
     name: 🍎 macOS
     uses: ./.github/workflows/macos_builds.yml
 
   web-build:
+    if: ${{ false }}
     name: 🌐 Web
     uses: ./.github/workflows/web_builds.yml
 
   # ── Create GitHub Release ───────────────────────────────────────────
 
   release:
+    if: ${{ false }}
     name: 📦 Publish Release
     needs: [windows-build, linux-build, macos-build, web-build]
     runs-on: ubuntu-latest

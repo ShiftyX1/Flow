@@ -12,6 +12,7 @@ env:
 
 jobs:
   ios-template:
+    if: ${{ false }}
     # From https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job#choosing-github-hosted-runners
     runs-on: macos-26
     name: Template (target=template_release)

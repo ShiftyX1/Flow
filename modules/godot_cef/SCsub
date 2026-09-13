@@ -1,0 +1,17 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+Import("env_modules")
+
+env_godot_cef = env_modules.Clone()
+
+runtime_path = env.get("godot_cef_runtime_path", "")
+if runtime_path:
+    runtime_path_define = '\\"{}\\"'.format(str(runtime_path).replace("\\", "/").replace('"', '\\"'))
+    env_godot_cef.Append(CPPDEFINES=[("GODOT_CEF_RUNTIME_PATH", runtime_path_define)])
+elif env.get("godot_cef_require_runtime", False):
+    print_error("godot_cef_require_runtime=yes requires godot_cef_runtime_path=<path>.")
+    Exit(255)
+
+env_godot_cef.add_source_files(env.modules_sources, "*.cpp")

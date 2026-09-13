@@ -31,7 +31,10 @@
 #include "register_types.h"
 
 #include "multiplayer_debugger.h"
+#include "multiplayer_predicted_body_3d.h"
+#include "multiplayer_simulation_clock.h"
 #include "multiplayer_spawner.h"
+#include "multiplayer_snapshot_buffer_3d.h"
 #include "multiplayer_synchronizer.h"
 #include "scene_multiplayer.h"
 #include "scene_replication_interface.h"
@@ -45,6 +48,9 @@
 
 void initialize_multiplayer_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+		GDREGISTER_CLASS(MultiplayerSimulationClock);
+		GDREGISTER_CLASS(MultiplayerSnapshotBuffer3D);
+		GDREGISTER_CLASS(MultiplayerPredictedBody3D);
 		GDREGISTER_CLASS(SceneReplicationConfig);
 		GDREGISTER_CLASS(MultiplayerSpawner);
 		GDREGISTER_CLASS(MultiplayerSynchronizer);

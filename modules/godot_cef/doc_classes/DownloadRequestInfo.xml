@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DownloadRequestInfo" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Initial browser download metadata.
+	</brief_description>
+	<description>
+		Emitted with CefTexture download_requested.
+	</description>
+	<members>
+		<member name="id" type="int" setter="set_id" getter="get_id" default="0">
+			Unique download identifier.
+		</member>
+		<member name="url" type="String" setter="set_url" getter="get_url" default="&quot;&quot;">
+			Download URL.
+		</member>
+		<member name="original_url" type="String" setter="set_original_url" getter="get_original_url" default="&quot;&quot;">
+			Original URL before redirects.
+		</member>
+		<member name="suggested_file_name" type="String" setter="set_suggested_file_name" getter="get_suggested_file_name" default="&quot;&quot;">
+			Suggested file name.
+		</member>
+		<member name="mime_type" type="String" setter="set_mime_type" getter="get_mime_type" default="&quot;&quot;">
+			Download MIME type.
+		</member>
+		<member name="total_bytes" type="int" setter="set_total_bytes" getter="get_total_bytes" default="-1">
+			Expected byte count, or -1 if unknown.
+		</member>
+	</members>
+</class>

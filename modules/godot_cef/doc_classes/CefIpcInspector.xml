@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CefIpcInspector" inherits="Control" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Debug control for inspecting Godot CEF IPC traffic.
+	</brief_description>
+	<description>
+		Editor/runtime helper for displaying IPC events from a CefTexture.
+	</description>
+</class>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelScene" inherits="Node3D" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Finite voxel volume rendered as a single mesh, editable in the 3D viewport.
+	</brief_description>
+	<description>
+		[VoxelScene] holds a fixed-size voxel volume (a [VoxelSceneData] resource) and renders it once as a single [MeshInstance3D] child when the node enters the scene tree. Designed for cinematics, main menus, decorative props, and other static voxel arrangements that do not need streaming, procedural generation, or runtime mutation.
+		Editing happens in the editor through a custom 3D viewport plugin (paint, erase, pick, box fill, box erase tools) and a palette dock listing all blocks of the assigned [VoxelBlockRegistry]. AO (ambient occlusion) is baked directly into vertex colors at mesh-build time when [member bake_ao] is enabled.
+		The runtime API is intentionally read-only ([method get_block], [method get_size]). For dynamic voxel terrain use [VoxelWorld] instead.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_block" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<param index="2" name="z" type="int" />
+			<description>
+				Returns the block ID at the given voxel cell, or 0 (air) if out of bounds.
+			</description>
+		</method>
+		<method name="get_block_v" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="pos" type="Vector3i" />
+			<description>
+				Vector form of [method get_block].
+			</description>
+		</method>
+		<method name="get_size" qualifiers="const">
+			<return type="Vector3i" />
+			<description>
+				Returns the size of the voxel volume in cells, or [code]Vector3i(0, 0, 0)[/code] if no [member voxel_data] is assigned.
+			</description>
+		</method>
+		<method name="local_to_voxel" qualifiers="const">
+			<return type="Vector3i" />
+			<param index="0" name="local_pos" type="Vector3" />
+			<description>
+				Converts a node-local position to voxel cell coordinates.
+			</description>
+		</method>
+		<method name="voxel_to_local" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="voxel_pos" type="Vector3i" />
+			<description>
+				Converts voxel cell coordinates to a node-local position (corner of the cell).
+			</description>
+		</method>
+		<method name="rebuild_mesh">
+			<return type="void" />
+			<description>
+				Rebuilds the rendered mesh from the current [member voxel_data] and [member block_registry]. Called automatically when [member auto_rebuild] is enabled and any of the relevant properties change.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="auto_rebuild" type="bool" setter="set_auto_rebuild" getter="get_auto_rebuild" default="true">
+			If [code]true[/code], the mesh is rebuilt automatically when [member voxel_data] or [member block_registry] emits the [signal Resource.changed] signal, or when render-related properties are modified.
+		</member>
+		<member name="bake_ao" type="bool" setter="set_bake_ao" getter="get_bake_ao" default="true">
+			If [code]true[/code], smooth ambient occlusion is computed per face vertex and multiplied into the vertex color. No additional shader is required — AO is baked into the geometry.
+		</member>
+		<member name="block_registry" type="VoxelBlockRegistry" setter="set_block_registry" getter="get_block_registry">
+			Block definitions used to render this voxel scene. The same resource can be shared with [VoxelWorld] and other [VoxelScene] nodes.
+		</member>
+		<member name="block_size" type="float" setter="set_block_size" getter="get_block_size" default="1.0">
+			Edge length of one voxel cell in node-local units.
+		</member>
+		<member name="texture_filter" type="int" setter="set_texture_filter" getter="get_texture_filter" enum="BaseMaterial3D.TextureFilter" default="0">
+			Texture filtering mode applied to all generated materials.
+		</member>
+		<member name="voxel_data" type="VoxelSceneData" setter="set_voxel_data" getter="get_voxel_data">
+			The voxel block data backing this scene. Can be saved as a [code].voxscene[/code] (compact binary) or [code].tres[/code] resource and reused across multiple nodes.
+		</member>
+	</members>
+</class>

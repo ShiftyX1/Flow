@@ -1,0 +1,50 @@
+[package]
+name = "gdcef"
+
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "gdcef"
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+godot = { workspace = true }
+cef = { workspace = true }
+cef-dll-sys = { workspace = true }
+process_path = { workspace = true }
+cef_app = { path = "../cef_app" }
+software_render = { path = "../software_render" }
+wide = { workspace = true }
+url = { workspace = true }
+percent-encoding = { workspace = true }
+adblock = { workspace = true }
+ciborium = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libloading = { workspace = true }
+objc2 = { workspace = true }
+objc2-metal = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true }
+windows-sys = { workspace = true }
+ash = { workspace = true }
+libloading = { workspace = true }
+
+[target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
+retour = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ash = { workspace = true }
+libloading = { workspace = true }
+libc = { workspace = true }
+quick-xml = { workspace = true }
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+retour = { workspace = true }

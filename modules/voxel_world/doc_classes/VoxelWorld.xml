@@ -57,6 +57,119 @@
 				Performs a voxel raycast from [param origin] in [param direction]. Returns a Dictionary with keys "position" (Vector3), "normal" (Vector3), "block_id" (int), and "block_pos" (Vector3i) if a solid block is hit, or an empty Dictionary if nothing is hit.
 			</description>
 		</method>
+		<method name="request_chunks_around">
+			<return type="void" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="radius" type="int" default="-1" />
+			<description>
+				Requests chunks in a square region around [param world_position]. If [param radius] is [code]-1[/code], [member chunk_load_radius] is used. This queues missing chunks without unloading camera-driven chunks outside the region.
+			</description>
+		</method>
+		<method name="get_chunk_region_load_status">
+			<return type="Dictionary" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="radius" type="int" default="-1" />
+			<description>
+				Returns chunk readiness around [param world_position] with keys [code]total[/code], [code]loaded[/code], [code]pending[/code], [code]remaining[/code], [code]progress[/code], and [code]ready[/code]. Pending and finished-but-not-integrated chunks are not considered loaded.
+			</description>
+		</method>
+		<method name="is_chunk_region_loaded">
+			<return type="bool" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="radius" type="int" default="-1" />
+			<description>
+				Returns [code]true[/code] when every chunk in the requested region around [param world_position] has been integrated into the scene tree.
+			</description>
+		</method>
+		<method name="advance_time">
+			<return type="void" />
+			<param index="0" name="hours" type="float" />
+			<description>
+				Advances [member day_night_time_of_day] by [param hours] (can be negative to rewind). Wraps around 0–24 automatically. Immediately updates sun, moon, ambient light, and fog.
+			</description>
+		</method>
+		<method name="is_daytime" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the current time is between 6:00 and 18:00.
+			</description>
+		</method>
+		<method name="is_nighttime" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the current time is before 6:00 or at/after 18:00.
+			</description>
+		</method>
+		<method name="get_day_factor" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns a smooth factor (0.0–1.0) representing how "daytime" it currently is. 1.0 = full day (7:00–17:00), 0.0 = full night (19:00–5:00), with smooth transitions during sunrise and sunset.
+			</description>
+		</method>
+		<method name="create_world_save">
+			<return type="int" />
+			<param index="0" name="save_dir" type="String" />
+			<param index="1" name="display_name" type="String" />
+			<param index="2" name="save_seed" type="int" default="-1" />
+			<param index="3" name="player_state" type="Dictionary" default="{}" />
+			<param index="4" name="character_state" type="Dictionary" default="{}" />
+			<description>
+				Creates a persistent world save rooted at [param save_dir], initializes the world seed, and writes [code]metadata.cfg[/code]. If [param save_seed] is [code]-1[/code], a random seed is resolved and stored for deterministic reloads.
+			</description>
+		</method>
+		<method name="load_world_save">
+			<return type="int" />
+			<param index="0" name="save_dir" type="String" />
+			<description>
+				Loads save metadata from [param save_dir], applies the saved seed and world time, clears loaded chunks, and reloads chunks from saved chunk deltas when available.
+			</description>
+		</method>
+		<method name="save_world_state">
+			<return type="int" />
+			<param index="0" name="player_state" type="Dictionary" default="{}" />
+			<param index="1" name="character_state" type="Dictionary" default="{}" />
+			<param index="2" name="max_dirty_chunks" type="int" default="-1" />
+			<description>
+				Updates [code]metadata.cfg[/code] with the current world time, seed, [param player_state], and [param character_state], then flushes dirty saved chunks according to [param max_dirty_chunks]. Use [code]0[/code] to write metadata only, [code]-1[/code] to flush all dirty chunks, or a positive value to write a bounded number of chunks.
+			</description>
+		</method>
+		<method name="flush_world_save_dirty_chunks">
+			<return type="int" />
+			<param index="0" name="max_chunks" type="int" default="1" />
+			<description>
+				Flushes up to [param max_chunks] dirty saved chunks to disk. Use [code]-1[/code] to flush all pending chunk writes.
+			</description>
+		</method>
+		<method name="get_world_save_dirty_chunk_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of dirty or queued saved chunks waiting to be written.
+			</description>
+		</method>
+		<method name="close_world_save">
+			<return type="int" />
+			<description>
+				Saves pending world state and detaches the current persistent save.
+			</description>
+		</method>
+		<method name="is_world_save_loaded" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when this VoxelWorld is attached to a persistent world save.
+			</description>
+		</method>
+		<method name="get_world_save_metadata" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the loaded save metadata, including display name, seed, world time, timestamps, player state, and character state.
+			</description>
+		</method>
+		<method name="get_world_save_player_state" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the player state loaded from or last written to the active world save.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="-1">
@@ -74,6 +187,36 @@
 		<member name="block_registry" type="VoxelBlockRegistry" setter="set_block_registry" getter="get_block_registry">
 			The block registry resource that defines block types, colors, and textures. If not set, a default registry with 10 built-in block types is created automatically.
 		</member>
+		<member name="day_night_start_time" type="float" setter="set_start_time_of_day" getter="get_start_time_of_day" default="7.0">
+			The time of day (0.0–24.0) at which the game starts. Applied to [member day_night_time_of_day] when the scene enters the tree at runtime. Changing this in the editor does not affect the live preview — use [member day_night_time_of_day] to preview different times.
+		</member>
+		<member name="day_night_time_of_day" type="float" setter="set_time_of_day" getter="get_time_of_day" default="7.0">
+			Current time of day in hours (0.0–24.0). 0/24 = midnight, 6 = sunrise, 12 = noon, 18 = sunset. Controls sun/moon rotation, ambient light color, and fog color when environment nodes are assigned via [member env_sun_path], [member env_moon_path], and [member env_environment_path]. Dragging the slider in the editor updates the scene in real-time for previewing. At runtime, this is overwritten by [member day_night_start_time] on startup and then advances automatically if [member day_night_auto_advance] is enabled.
+		</member>
+		<member name="day_night_day_length" type="float" setter="set_day_length_seconds" getter="get_day_length_seconds" default="600.0">
+			Duration of one full day/night cycle in real seconds. Only used when [member day_night_auto_advance] is [code]true[/code]. Valid range: 10 to 3600 seconds.
+		</member>
+		<member name="day_night_auto_advance" type="bool" setter="set_auto_advance_time" getter="get_auto_advance_time" default="false">
+			If [code]true[/code], [member day_night_time_of_day] advances automatically each frame based on [member day_night_day_length]. Emits [signal time_of_day_changed] each frame.
+		</member>
+		<member name="day_night_time_speed" type="float" setter="set_time_speed" getter="get_time_speed" default="1.0">
+			Multiplier for the automatic time advancement speed. 1.0 = normal, 2.0 = double speed, 0.5 = half speed. Only affects time when [member day_night_auto_advance] is [code]true[/code]. Valid range: 0.0 to 100.0.
+		</member>
+		<member name="fog_enabled" type="bool" setter="set_fog_enabled" getter="get_fog_enabled" default="true">
+			If [code]true[/code], distance fog is applied to the environment. Fog fades distant terrain to the sky color, matching the current time of day.
+		</member>
+		<member name="fog_distance_ratio" type="float" setter="set_fog_distance_ratio" getter="get_fog_distance_ratio" default="0.85">
+			Fog end distance as a fraction of the total draw distance ([member chunk_load_radius] × chunk size × [member block_size]). Lower values make fog start earlier. Valid range: 0.3 to 1.0.
+		</member>
+		<member name="env_sun_path" type="NodePath" setter="set_sun_path" getter="get_sun_path" default="NodePath(&quot;&quot;)">
+			Path to a [DirectionalLight3D] node used as the sun. VoxelWorld will rotate it, and adjust its color and energy based on [member day_night_time_of_day].
+		</member>
+		<member name="env_moon_path" type="NodePath" setter="set_moon_path" getter="get_moon_path" default="NodePath(&quot;&quot;)">
+			Path to a [DirectionalLight3D] node used as the moon. Optional. VoxelWorld will rotate it opposite to the sun and set a cool blue-white color at night.
+		</member>
+		<member name="env_environment_path" type="NodePath" setter="set_environment_path" getter="get_environment_path" default="NodePath(&quot;&quot;)">
+			Path to a [WorldEnvironment] node. VoxelWorld will update its [Environment] resource's ambient light, fog color/density, and fog distance based on the time of day.
+		</member>
 	</members>
 	<signals>
 		<signal name="block_placed">
@@ -88,6 +231,12 @@
 			<param index="1" name="old_block_id" type="int" />
 			<description>
 				Emitted when a block is broken (set to Air) via [method set_block_at].
+			</description>
+		</signal>
+		<signal name="time_of_day_changed">
+			<param index="0" name="time" type="float" />
+			<description>
+				Emitted when the time of day changes — either every frame when [member day_night_auto_advance] is [code]true[/code], or when [method set_time_of_day] / [method advance_time] is called.
 			</description>
 		</signal>
 	</signals>

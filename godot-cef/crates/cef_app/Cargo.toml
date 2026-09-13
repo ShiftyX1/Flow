@@ -1,0 +1,23 @@
+[package]
+name = "cef_app"
+
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+cef = { workspace = true }
+ciborium = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libloading = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true }

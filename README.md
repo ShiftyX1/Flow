@@ -1,20 +1,24 @@
-# Godot Engine
+# Flow Engine
+
+Flow Engine is a fork of the Godot Engine maintained by the Pulse Studio team.
+It preserves Godot's cross-platform 2D and 3D foundation while evolving the
+engine for specific gameplay, tools, and workflows.
 
 <p align="center">
   <a href="https://godotengine.org">
-    <img src="logo_outlined.svg" width="400" alt="Godot Engine logo">
+    <img src="icon.svg" width="400" alt="Godot Engine logo">
   </a>
 </p>
 
-## 2D and 3D cross-platform game engine
+## Flow Engine: 2D and 3D cross-platform game engine
 
-**[Godot Engine](https://godotengine.org) is a feature-packed, cross-platform
-game engine to create 2D and 3D games from a unified interface.** It provides a
-comprehensive set of [common tools](https://godotengine.org/features), so that
-users can focus on making games without having to reinvent the wheel. Games can
-be exported with one click to a number of platforms, including the major desktop
-platforms (Linux, macOS, Windows), mobile platforms (Android, iOS), as well as
-Web-based platforms and [consoles](https://godotengine.org/consoles).
+**Flow Engine is a feature-packed, cross-platform
+game engine and a Pulse Studio fork of Godot for creating 2D and 3D games from
+a unified interface.** It provides a comprehensive set of [common tools](https://godotengine.org/features),
+so that users can focus on making games without having to reinvent the wheel.
+Games can be exported with one click to a number of platforms, including the
+major desktop platforms (Linux, macOS, Windows), mobile platforms (Android,
+iOS), as well as Web-based platforms and [consoles](https://godotengine.org/consoles).
 
 ## Free, open source and community-driven
 

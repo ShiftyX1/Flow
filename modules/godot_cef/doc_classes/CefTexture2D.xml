@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CefTexture2D" inherits="Texture2D" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Texture2D browser resource backed by Chromium Embedded Framework.
+	</brief_description>
+	<description>
+		Render-first browser texture resource used directly or through CefTexture.
+	</description>
+</class>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelSceneData" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Fixed-size voxel block volume used by [VoxelScene].
+	</brief_description>
+	<description>
+		Stores a [member size] of [code]uint16[/code] block IDs in row-major order [code](y, z, x)[/code]. Used as the data source of a [VoxelScene] node.
+		Can be saved either as the compact RLE-compressed binary [code].voxscene[/code] format or as a regular Godot [code].tres[/code] resource.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_block" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<param index="2" name="z" type="int" />
+			<description>Returns the block ID at the given cell, or 0 if out of bounds.</description>
+		</method>
+		<method name="get_block_v" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="pos" type="Vector3i" />
+			<description>Vector form of [method get_block].</description>
+		</method>
+		<method name="set_block">
+			<return type="void" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<param index="2" name="z" type="int" />
+			<param index="3" name="block_id" type="int" />
+			<description>Sets the block ID at the given cell. Emits [signal Resource.changed].</description>
+		</method>
+		<method name="set_block_v">
+			<return type="void" />
+			<param index="0" name="pos" type="Vector3i" />
+			<param index="1" name="block_id" type="int" />
+			<description>Vector form of [method set_block].</description>
+		</method>
+		<method name="fill">
+			<return type="void" />
+			<param index="0" name="block_id" type="int" />
+			<description>Fills the entire volume with [param block_id].</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Equivalent to [code]fill(0)[/code].</description>
+		</method>
+		<method name="in_bounds" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<param index="2" name="z" type="int" />
+			<description>Returns whether the given cell is within bounds.</description>
+		</method>
+		<method name="in_bounds_v" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="pos" type="Vector3i" />
+			<description>Vector form of [method in_bounds].</description>
+		</method>
+	</methods>
+	<members>
+		<member name="size" type="Vector3i" setter="set_size" getter="get_size" default="Vector3i(64, 64, 64)">
+			Volume size in cells. Resizing preserves overlapping cells; new cells are filled with air.
+		</member>
+	</members>
+</class>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelStructureRegistry" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Registry of deterministic voxel structure templates.
+	</brief_description>
+	<description>
+		Stores structure definitions used by [VoxelWorld] to place finite [VoxelSceneData] templates and optional sparse world objects.
+	</description>
+	<methods>
+		<method name="setup_defaults">
+			<return type="void" />
+			<description>
+				Populates the registry with the built-in restored forest emergency beacon slice.
+			</description>
+		</method>
+	</methods>
+</class>

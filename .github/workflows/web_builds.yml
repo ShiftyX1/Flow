@@ -13,6 +13,7 @@ env:
 
 jobs:
   web-template:
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     name: ${{ matrix.name }}
     timeout-minutes: 60

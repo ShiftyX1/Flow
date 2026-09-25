@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MobaMapPalette" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Materials and object scenes for the MOBA editor.
+	</brief_description>
+	<description>
+		Assign reusable materials and PackedScenes through the Inspector. Object scenes need a Node3D root; static collision shapes participate in navigation. Palettes can be shared across maps.
+	</description>
+	<tutorials />
+	<methods>
+		<method name="create_defaults">
+			<return type="void" />
+			<description>
+				Replaces the palette with grass, path and stone materials plus primitive tree and rock scenes.
+			</description>
+		</method>
+		<method name="get_material" qualifiers="const">
+			<return type="Material" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the indexed material; falls back to the first entry when the index is outside the palette, or null for an empty palette.
+			</description>
+		</method>
+		<method name="get_object" qualifiers="const">
+			<return type="PackedScene" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the indexed object scene or null when outside the palette.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="materials" type="Material[]" setter="set_materials" getter="get_materials" default="Array[Material]([])">
+			Up to 256 terrain materials. Cells store indices into this array.
+		</member>
+		<member name="objects" type="PackedScene[]" setter="set_objects" getter="get_objects" default="Array[PackedScene]([])">
+			Scenes available for placement and forest painting.
+		</member>
+	</members>
+</class>

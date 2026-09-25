@@ -1,0 +1,287 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/tree.tscn" id="Tree"]
+[ext_resource type="PackedScene" path="res://assets/rock.tscn" id="Rock"]
+
+[sub_resource type="StandardMaterial3D" id="Grass"]
+resource_name = "Grass"
+albedo_color = Color(0.22, 0.39, 0.19, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Path"]
+resource_name = "Path"
+albedo_color = Color(0.49, 0.39, 0.25, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Stone"]
+resource_name = "Stone"
+albedo_color = Color(0.38, 0.41, 0.44, 1)
+roughness = 0.9
+
+[sub_resource type="MobaMapPalette" id="Palette"]
+materials = Array[Material]([SubResource("Grass"), SubResource("Path"), SubResource("Stone")])
+objects = Array[PackedScene]([ExtResource("Tree"), ExtResource("Rock")])
+
+[sub_resource type="MobaMapData" id="Terrain"]
+resource_local_to_scene = true
+size = Vector2i(32, 32)
+cell_size = 4.0
+height_step = 2.0
+cells = PackedInt32Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 1, 1, 0, 1, 1, 0, 1, 1, 2, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 1, 1, 0, 1, 1, 0, 1, 1, 2, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 1, 1, 0, 1, 1, 0, 1, 1, 2, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+[node name="MobaWorkshop" type="MobaMapPreview3D"]
+map_path = NodePath("Map")
+
+[node name="Map" type="MobaMap3D" parent="."]
+map_data = SubResource("Terrain")
+palette = SubResource("Palette")
+
+[node name="Spawn" type="MobaMapMarker3D" parent="Map"]
+position = Vector3(10, 0, 82)
+kind = 0
+marker_id = &"player_spawn"
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="HighGround" type="MobaMapMarker3D" parent="Map"]
+position = Vector3(98, 4, 66)
+kind = 1
+marker_id = &"high_ground"
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree1" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(22, 2, 22)
+rotation = Vector3(0, 0.000, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree2" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(30, 2, 22)
+rotation = Vector3(0, 1.371, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree3" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(42, 2, 22)
+rotation = Vector3(0, 2.742, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree4" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(22, 2, 30)
+rotation = Vector3(0, 4.113, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree5" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(42, 2, 30)
+rotation = Vector3(0, 5.484, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree6" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(22, 2, 54)
+rotation = Vector3(0, 0.575, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree7" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(34, 2, 54)
+rotation = Vector3(0, 1.946, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree8" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(46, 2, 54)
+rotation = Vector3(0, 3.317, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree9" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(26, 0, 78)
+rotation = Vector3(0, 4.688, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree10" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(30, 0, 86)
+rotation = Vector3(0, 6.059, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree11" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(38, 0, 82)
+rotation = Vector3(0, 1.150, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree12" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(46, 0, 86)
+rotation = Vector3(0, 2.521, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree13" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(58, 0, 26)
+rotation = Vector3(0, 3.892, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree14" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(58, 0, 34)
+rotation = Vector3(0, 5.263, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree15" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(58, 0, 46)
+rotation = Vector3(0, 0.354, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree16" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(58, 0, 90)
+rotation = Vector3(0, 1.725, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree17" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(58, 0, 102)
+rotation = Vector3(0, 3.096, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree18" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(74, 2, 22)
+rotation = Vector3(0, 4.467, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree19" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(78, 2, 22)
+rotation = Vector3(0, 5.838, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree20" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(90, 4, 34)
+rotation = Vector3(0, 0.929, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree21" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(102, 4, 34)
+rotation = Vector3(0, 2.300, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree22" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(110, 4, 42)
+rotation = Vector3(0, 3.671, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree23" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(90, 4, 50)
+rotation = Vector3(0, 5.042, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree24" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(102, 4, 50)
+rotation = Vector3(0, 0.133, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree25" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(90, 4, 82)
+rotation = Vector3(0, 1.504, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree26" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(102, 4, 90)
+rotation = Vector3(0, 2.875, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree27" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(110, 4, 86)
+rotation = Vector3(0, 4.246, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree28" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(74, 2, 98)
+rotation = Vector3(0, 5.617, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree29" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(78, 2, 106)
+rotation = Vector3(0, 0.708, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Tree30" parent="Map" instance=ExtResource("Tree")]
+position = Vector3(118, 2, 102)
+rotation = Vector3(0, 2.079, 0)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Rock1" parent="Map" instance=ExtResource("Rock")]
+position = Vector3(26, 2, 38)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Rock2" parent="Map" instance=ExtResource("Rock")]
+position = Vector3(62, 0, 74)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Rock3" parent="Map" instance=ExtResource("Rock")]
+position = Vector3(90, 4, 70)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0
+
+[node name="Rock4" parent="Map" instance=ExtResource("Rock")]
+position = Vector3(118, 2, 30)
+metadata/moba_placed_object = true
+metadata/moba_grounded = true
+metadata/moba_height_offset = 0.0

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MobaMapPreview3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Optional click-to-move map preview harness.
+	</brief_description>
+	<description>
+		At runtime, creates a capsule hero, following orthographic camera, light and status overlay. Left-click terrain to move and use the mouse wheel to zoom. Waits for map navigation before spawning. Contains no MOBA game rules. The editor Play map command creates a separate scene with this node and a snapshot of the map.
+	</description>
+	<tutorials />
+	<members>
+		<member name="map_path" type="NodePath" setter="set_map_path" getter="get_map_path" default='NodePath("Map")'>
+			Path to the map to preview.
+		</member>
+	</members>
+</class>

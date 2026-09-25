@@ -1,0 +1,16 @@
+; Open this project with a Flow build that includes the moba_map module.
+config_version=5
+
+[application]
+config/name="Flow MOBA Map Workshop"
+run/main_scene="res://demo.tscn"
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=800
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.16, 0.2, 0.25, 1)

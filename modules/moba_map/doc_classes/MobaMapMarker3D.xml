@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MobaMapMarker3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Spawn or named point of interest on a MOBA map.
+	</brief_description>
+	<description>
+		Place directly beneath [MobaMap3D]. The editor draws a selectable flag. The optional [MobaMapPreview3D] uses the first spawn marker; other marker behavior belongs to the game.
+	</description>
+	<tutorials />
+	<members>
+		<member name="kind" type="int" setter="set_kind" getter="get_kind" enum="MobaMapMarker3D.Kind" default="1">
+			Marker purpose.
+		</member>
+		<member name="marker_id" type="StringName" setter="set_marker_id" getter="get_marker_id" default='&amp;"point"'>
+			Identifier available to game scripts.
+		</member>
+	</members>
+	<constants>
+		<constant name="SPAWN" value="0" enum="Kind">Hero starting position.</constant>
+		<constant name="POINT_OF_INTEREST" value="1" enum="Kind">Named map location.</constant>
+	</constants>
+</class>

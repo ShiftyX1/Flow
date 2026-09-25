@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MobaMap3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Chunked plateau terrain with integrated map-authoring tools.
+	</brief_description>
+	<description>
+		Generates meshes and static collision from [MobaMapData] in 16 by 16-cell chunks. Scene objects remain ordinary child nodes. Runtime navigation is baked on entering the tree. Wait for [signal navigation_baked] before requesting paths. Keep rotation and scale at defaults; the navigation profile uses Y-up world units.
+	</description>
+	<tutorials />
+	<methods>
+		<method name="attach_object">
+			<return type="void" />
+			<param index="0" name="object" type="Node3D" />
+			<param index="1" name="owner" type="Node" />
+			<description>
+				Attaches a detached Node3D and assigns scene ownership. Used by editor undo/redo. Grounded objects snap to terrain.
+			</description>
+		</method>
+		<method name="detach_object">
+			<return type="void" />
+			<param index="0" name="object" type="Node3D" />
+			<description>
+				Detaches an object without freeing it and invalidates navigation. The caller owns its lifetime.
+			</description>
+		</method>
+		<method name="bake_navigation">
+			<return type="void" />
+			<description>
+				Asynchronously bakes terrain and child static colliders. Concurrent requests are coalesced; results from outdated geometry are discarded. Uses radius 0.4, height 1.7, climb 0.1 and maximum slope 50 degrees.
+			</description>
+		</method>
+		<method name="get_markers" qualifiers="const">
+			<return type="MobaMapMarker3D[]" />
+			<description>
+				Returns direct marker children in scene order.
+			</description>
+		</method>
+		<method name="get_navigation_mesh" qualifiers="const">
+			<return type="NavigationMesh" />
+			<description>
+				Returns the last baked mesh or null. Check [method is_navigation_ready] before using it.
+			</description>
+		</method>
+		<method name="get_plateau_level" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<description>
+				Returns the base plateau level at map-local X/Z. Returns zero without data or outside the map.
+			</description>
+		</method>
+		<method name="get_surface_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<description>
+				Returns interpolated map-local surface height. Returns zero without data or outside the map.
+			</description>
+		</method>
+		<method name="is_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns true when a current bake has completed with walkable polygons. The navigation server synchronizes regions on a physics tick.
+			</description>
+		</method>
+		<method name="raycast_surface" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="world_origin" type="Vector3" />
+			<param index="1" name="world_direction" type="Vector3" />
+			<description>
+				Raycasts generated terrain using world-space arguments. Returns position and local_position, or an empty Dictionary. Object scenes are not included.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="map_data" type="MobaMapData" setter="set_map_data" getter="get_map_data">
+			Source terrain. Use Map settings in the editor to create a fresh resource.
+		</member>
+		<member name="palette" type="MobaMapPalette" setter="set_palette" getter="get_palette">
+			Terrain materials and placeable scenes.
+		</member>
+	</members>
+	<signals>
+		<signal name="navigation_baked">
+			<param index="0" name="success" type="bool" />
+			<description>Emitted when a current bake finishes. False means there is no usable navigation. Outdated results trigger a fresh bake and are not reported as ready.</description>
+		</signal>
+	</signals>
+</class>

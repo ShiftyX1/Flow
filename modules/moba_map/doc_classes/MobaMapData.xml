@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MobaMapData" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Editable plateau terrain and explicit ramp connections.
+	</brief_description>
+	<description>
+		Stores an X/Z cell grid for [MobaMap3D]. Each cell contains a level, palette material index and ramp direction. Ramps rise across one cell toward a flat neighbour one level higher. Changes notify only the affected region. Resources are local to scene instances by default.
+	</description>
+	<tutorials />
+	<methods>
+		<method name="apply_cells">
+			<return type="void" />
+			<param index="0" name="patch" type="Dictionary" />
+			<description>
+				Atomically applies a Dictionary mapping Vector2i cell coordinates to Vector3i(level, material, ramp). Invalid values reject the patch. Nearby ramps with disconnected endpoints are removed.
+			</description>
+		</method>
+		<method name="can_place_ramp" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="direction" type="int" />
+			<param index="2" name="width" type="int" default="1" />
+			<description>
+				Returns whether all cells across the width connect flat low and high plateaus. The width is centered on cell, perpendicular to direction.
+			</description>
+		</method>
+		<method name="contains" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether a cell is inside the map.
+			</description>
+		</method>
+		<method name="get_cell" qualifiers="const">
+			<return type="Vector3i" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns (plateau level, material index, ramp direction), or Vector3i.ZERO outside the map.
+			</description>
+		</method>
+		<method name="get_cells" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns packed triples in Z-major order. Prefer [method apply_cells] for regular edits.
+			</description>
+		</method>
+		<method name="get_plateau_level" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<description>
+				Returns the base plateau level at map-local X/Z, including at ramps. Returns zero outside the map.
+			</description>
+		</method>
+		<method name="get_surface_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<description>
+				Returns the map-local surface height, interpolated along ramps. Returns zero outside the map.
+			</description>
+		</method>
+		<method name="place_ramp">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="direction" type="int" />
+			<param index="2" name="width" type="int" default="1" />
+			<description>
+				Places parallel ramp cells and returns true. Leaves the data unchanged when placement is invalid.
+			</description>
+		</method>
+		<method name="set_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="level" type="int" />
+			<param index="2" name="material" type="int" />
+			<param index="3" name="ramp" type="int" default="0" />
+			<description>
+				Updates one cell. Valid ranges: level -128 to 128, material 0 to 255, and a Ramp direction.
+			</description>
+		</method>
+		<method name="set_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="PackedInt32Array" />
+			<description>
+				Replaces packed triples. Length must equal size.x * size.y * 3. Values are validated before mutation; invalidated nearby ramps are cleared.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="4.0">
+			Width and depth of each cell in world units; range 1 to 64.
+		</member>
+		<member name="height_step" type="float" setter="set_height_step" getter="get_height_step" default="2.0">
+			Vertical distance between plateau levels; range 0.5 to 32.
+		</member>
+		<member name="size" type="Vector2i" setter="set_size" getter="get_size" default="Vector2i(64, 64)">
+			Grid dimensions, 1 to 1024 on each axis. Resizing preserves overlapping cells.
+		</member>
+	</members>
+	<signals>
+		<signal name="region_changed">
+			<param index="0" name="region" type="Rect2i" />
+			<description>Emitted after source data changes. The rectangle includes removed invalid ramps.</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="RAMP_NONE" value="0" enum="Ramp">Flat cell.</constant>
+		<constant name="RAMP_NORTH" value="1" enum="Ramp">Rises toward negative Z.</constant>
+		<constant name="RAMP_EAST" value="2" enum="Ramp">Rises toward positive X.</constant>
+		<constant name="RAMP_SOUTH" value="3" enum="Ramp">Rises toward positive Z.</constant>
+		<constant name="RAMP_WEST" value="4" enum="Ramp">Rises toward negative X.</constant>
+	</constants>
+</class>

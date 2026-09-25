@@ -261,18 +261,34 @@ MobaMap3D *MobaMapEditorPlugin::get_map() const {
 	return Object::cast_to<MobaMap3D>(ObjectDB::get_instance(map_id));
 }
 
+MobaMap3D *MobaMapEditorPlugin::_map_from(Object *p_object) {
+	// Selecting a placed tree or a marker must keep the map under the brush.
+	Node *node = Object::cast_to<Node>(p_object);
+	while (node) {
+		MobaMap3D *map = Object::cast_to<MobaMap3D>(node);
+		if (map) {
+			return map;
+		}
+		node = node->get_parent();
+	}
+	return nullptr;
+}
+
 bool MobaMapEditorPlugin::handles(Object *p_object) const {
-	return Object::cast_to<MobaMap3D>(p_object) != nullptr;
+	return _map_from(p_object) != nullptr;
 }
 
 void MobaMapEditorPlugin::edit(Object *p_object) {
-	_finish_stroke();
+	MobaMap3D *map = _map_from(p_object);
 	MobaMap3D *previous = get_map();
+	if (map && map == previous) {
+		return;
+	}
+	_finish_stroke();
 	map_id = ObjectID();
 	if (previous) {
 		previous->update_gizmos();
 	}
-	MobaMap3D *map = Object::cast_to<MobaMap3D>(p_object);
 	map_id = map ? map->get_instance_id() : ObjectID();
 	hovered = false;
 	_refresh_palette();
@@ -295,7 +311,12 @@ void MobaMapEditorPlugin::apply_changes() {
 }
 
 void MobaMapEditorPlugin::_notification(int p_what) {
-	if (p_what == NOTIFICATION_INTERNAL_PROCESS) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		if (!is_input_event_forwarding_always_enabled()) {
+			// The 3D viewport offers this list the input first, before selection and gizmos.
+			set_input_event_forwarding_always_enabled();
+		}
+	} else if (p_what == NOTIFICATION_INTERNAL_PROCESS) {
 		if (stroke && !Input::get_singleton()->is_mouse_button_pressed(MouseButton::LEFT)) {
 			_finish_stroke();
 		}
@@ -674,12 +695,47 @@ void MobaMapEditorPlugin::_finish_stroke(bool p_cancel) {
 	map->rebuild_dirty();
 }
 
+bool MobaMapEditorPlugin::_update_hover(Camera3D *p_camera, const Vector2 &p_point) {
+	hovered = false;
+	MobaMap3D *map = get_map();
+	if (!map || map->get_map_data().is_null()) { return false; }
+	Ref<MobaMapData> data = map->get_map_data();
+	Vector3 origin = p_camera->project_ray_origin(p_point);
+	Vector3 direction = p_camera->project_ray_normal(p_point);
+	Vector3 hit;
+	if (map->raycast(origin, direction, hit)) {
+		hover_position = map->to_local(hit);
+	} else {
+		// Chunk geometry can be missing above an empty plateau, and the brush still has
+		// to reach those cells, so walk the ray onto the heightfield instead.
+		Transform3D inverse = map->get_global_transform().affine_inverse();
+		Vector3 from = inverse.xform(origin);
+		Vector3 dir = inverse.basis.xform(direction).normalized();
+		if (Math::abs(dir.y) < CMP_EPSILON) { return false; }
+		real_t height = 0.0;
+		for (int i = 0; i < 4; ++i) {
+			real_t distance = (height - from.y) / dir.y;
+			if (distance <= 0) { return false; }
+			Vector3 point = from + dir * distance;
+			real_t next = data->get_surface_height(Vector2(point.x, point.z));
+			hover_position = Vector3(point.x, next, point.z);
+			if (Math::is_equal_approx(next, height)) { break; }
+			height = next;
+		}
+	}
+	real_t cell = data->get_cell_size();
+	hover_cell = Vector2i((int)Math::floor(hover_position.x / cell), (int)Math::floor(hover_position.z / cell));
+	hovered = data->contains(hover_cell);
+	return hovered;
+}
+
 EditorPlugin::AfterGUIInput MobaMapEditorPlugin::forward_3d_gui_input(Camera3D *p_camera, const Ref<InputEvent> &p_event) {
 	MobaMap3D *map = get_map();
-	if (!map || map->get_map_data().is_null()) { return AFTER_GUI_INPUT_PASS; }
+	if (!map || map->get_map_data().is_null() || !toolbar->is_visible()) { return AFTER_GUI_INPUT_PASS; }
+	bool painting = get_tool() != SELECT;
 	Ref<InputEventKey> key = p_event;
 	if (key.is_valid() && key->is_pressed()) {
-		if (key->get_keycode() == Key::ESCAPE) {
+		if (key->get_keycode() == Key::ESCAPE && (stroke || painting)) {
 			if (stroke) { _finish_stroke(true); }
 			else { tools->select(SELECT); }
 			map->update_gizmos();
@@ -701,30 +757,29 @@ EditorPlugin::AfterGUIInput MobaMapEditorPlugin::forward_3d_gui_input(Camera3D *
 		map->update_gizmos();
 		return AFTER_GUI_INPUT_PASS;
 	}
-	Vector3 hit;
-	hovered = map->raycast(p_camera->project_ray_origin(mouse->get_position()), p_camera->project_ray_normal(mouse->get_position()), hit);
-	if (hovered) {
-		hover_position = map->to_local(hit);
-		real_t cell = map->get_map_data()->get_cell_size();
-		hover_cell = Vector2i((int)Math::floor(hover_position.x / cell), (int)Math::floor(hover_position.z / cell));
-		hovered = map->get_map_data()->contains(hover_cell);
-	}
+	// Wheel zoom and the other buttons stay with the viewport camera.
+	if (button.is_valid() && button->get_button_index() != MouseButton::LEFT) { return AFTER_GUI_INPUT_PASS; }
+	_update_hover(p_camera, mouse->get_position());
 	map->update_gizmos();
-	if (get_tool() == SELECT) { return AFTER_GUI_INPUT_PASS; }
-	if (!hovered) { return stroke ? AFTER_GUI_INPUT_STOP : AFTER_GUI_INPUT_PASS; }
-	if (button.is_valid() && button->get_button_index() == MouseButton::LEFT && button->is_pressed()) {
-		_begin_stroke(mouse->is_ctrl_pressed(), mouse->is_shift_pressed());
+	if (!painting) { return AFTER_GUI_INPUT_PASS; }
+	if (button.is_valid()) {
+		// A brush owns the whole left click, otherwise the viewport picks a node instead.
+		if (button->is_pressed() && hovered) {
+			_begin_stroke(mouse->is_ctrl_pressed(), mouse->is_shift_pressed());
+		}
 		return AFTER_GUI_INPUT_STOP;
 	}
 	Ref<InputEventMouseMotion> motion = p_event;
 	if (motion.is_valid() && stroke) {
-		Vector2 target(hover_position.x, hover_position.z);
-		real_t distance = last_stamp.distance_to(target);
-		int samples = MIN(2048, (int)Math::ceil(distance / (map->get_map_data()->get_cell_size() * 0.25)));
-		for (int i = 1; i <= samples; ++i) {
-			_stamp(last_stamp.lerp(target, (real_t)i / samples));
+		if (hovered) {
+			Vector2 target(hover_position.x, hover_position.z);
+			real_t distance = last_stamp.distance_to(target);
+			int samples = MIN(2048, (int)Math::ceil(distance / (map->get_map_data()->get_cell_size() * 0.25)));
+			for (int i = 1; i <= samples; ++i) {
+				_stamp(last_stamp.lerp(target, (real_t)i / samples));
+			}
+			last_stamp = target;
 		}
-		last_stamp = target;
 		return AFTER_GUI_INPUT_STOP;
 	}
 	return AFTER_GUI_INPUT_PASS;

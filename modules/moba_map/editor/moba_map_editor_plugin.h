@@ -74,6 +74,8 @@ private:
 	RandomPCG random;
 	String notice;
 
+	static MobaMap3D *_map_from(Object *p_object);
+	bool _update_hover(Camera3D *p_camera, const Vector2 &p_point);
 	void _show_create();
 	void _create_map();
 	void _tool_changed(int p_index);

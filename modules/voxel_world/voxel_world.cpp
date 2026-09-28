@@ -18,6 +18,7 @@
 #include "servers/rendering/rendering_server.h"
 
 static bool voxel_global_shader_parameter_registered = false;
+static bool cloud_global_shader_parameters_registered = false;
 
 void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &VoxelWorld::set_seed);
@@ -82,6 +83,8 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fog_enabled"), &VoxelWorld::get_fog_enabled);
 	ClassDB::bind_method(D_METHOD("set_fog_distance_ratio", "ratio"), &VoxelWorld::set_fog_distance_ratio);
 	ClassDB::bind_method(D_METHOD("get_fog_distance_ratio"), &VoxelWorld::get_fog_distance_ratio);
+	ClassDB::bind_method(D_METHOD("set_weather_light_multiplier", "multiplier"), &VoxelWorld::set_weather_light_multiplier);
+	ClassDB::bind_method(D_METHOD("get_weather_light_multiplier"), &VoxelWorld::get_weather_light_multiplier);
 	ClassDB::bind_method(D_METHOD("set_sun_path", "path"), &VoxelWorld::set_sun_path);
 	ClassDB::bind_method(D_METHOD("get_sun_path"), &VoxelWorld::get_sun_path);
 	ClassDB::bind_method(D_METHOD("set_moon_path", "path"), &VoxelWorld::set_moon_path);
@@ -151,6 +154,9 @@ void VoxelWorld::_bind_methods() {
 	ADD_GROUP("Fog", "fog_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "fog_enabled"), "set_fog_enabled", "get_fog_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fog_distance_ratio", PROPERTY_HINT_RANGE, "0.3,1.0,0.01"), "set_fog_distance_ratio", "get_fog_distance_ratio");
+
+	ADD_GROUP("Weather", "weather_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "weather_light_multiplier", PROPERTY_HINT_RANGE, "0.2,1.0,0.01"), "set_weather_light_multiplier", "get_weather_light_multiplier");
 
 	ADD_GROUP("Environment References", "env_");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "env_sun_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "DirectionalLight3D"), "set_sun_path", "get_sun_path");
@@ -292,6 +298,10 @@ void VoxelWorld::set_day_length_seconds(float p_seconds) {
 
 void VoxelWorld::set_fog_distance_ratio(float p_ratio) {
 	fog_distance_ratio = CLAMP(p_ratio, 0.3f, 1.0f);
+}
+
+void VoxelWorld::set_weather_light_multiplier(float p_multiplier) {
+	weather_light_multiplier = CLAMP(p_multiplier, 0.2f, 1.0f);
 }
 
 // --- Chunk border debug visualization ---
@@ -441,6 +451,23 @@ void VoxelWorld::_ensure_voxel_global_shader_parameter(float p_value) {
 	}
 }
 
+// Cloud shadow inputs for the voxel shader. Values are driven from GDScript
+// (ClientWeather); defaults keep shadow strength at zero.
+void VoxelWorld::_ensure_cloud_global_shader_parameters() {
+	if (cloud_global_shader_parameters_registered) {
+		return;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	rs->global_shader_parameter_add(StringName("cloud_weather_map"), RSE::GLOBAL_VAR_TYPE_SAMPLER2D, RID());
+	rs->global_shader_parameter_add(StringName("cloud_shadow_params"), RSE::GLOBAL_VAR_TYPE_VEC4, Vector4(0.0f, 0.0f, 1.0f / 10240.0f, 0.0f));
+	rs->global_shader_parameter_add(StringName("cloud_layer_params"), RSE::GLOBAL_VAR_TYPE_VEC4, Vector4(170.0f, 120.0f, 0.0f, 0.35f));
+	rs->global_shader_parameter_add(StringName("cloud_sun_direction"), RSE::GLOBAL_VAR_TYPE_VEC3, Vector3(0.0f, 1.0f, 0.0f));
+	cloud_global_shader_parameters_registered = true;
+}
+
 // Compute a smooth factor for how "daytime" it is. 1.0 = full day, 0.0 = full night.
 static float _compute_day_factor(float p_time) {
 	// Sunrise at 5-7, sunset at 17-19. Smooth transitions.
@@ -548,7 +575,7 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 		sun_node->set_rotation(Vector3(-sun_angle, 0.0f, 0.0f));
 
 		// Sun energy: bright at noon, off at night.
-		float sun_energy = CLAMP(day_factor * 1.2f, 0.0f, 1.2f);
+		float sun_energy = CLAMP(day_factor * 1.2f, 0.0f, 1.2f) * weather_light_multiplier;
 		sun_node->set_param(Light3D::PARAM_ENERGY, sun_energy);
 
 		// Sun color: warm white at noon, orange at sunrise/sunset. Lerp smoothly.
@@ -564,10 +591,14 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 		moon_node->set_rotation(Vector3(-moon_angle, 0.2f, 0.0f));
 
 		// Moon only visible at night.
-		float moon_energy = CLAMP((1.0f - day_factor) * 0.15f, 0.0f, 0.15f);
+		float moon_energy = CLAMP((1.0f - day_factor) * 0.15f, 0.0f, 0.15f) * weather_light_multiplier;
 		moon_node->set_param(Light3D::PARAM_ENERGY, moon_energy);
 		moon_node->set_color(Color(0.6f, 0.7f, 0.9f));
 	}
+
+	// Overcast skies scatter light: ambient dims less than direct sun and loses its tint.
+	float diffuse_weather = Math::lerp(1.0f, weather_light_multiplier, 0.6f);
+	float overcast_amount = CLAMP((1.0f - weather_light_multiplier) / 0.8f, 0.0f, 1.0f);
 
 	// --- Environment (ambient light + fog) ---
 	if (env_node) {
@@ -578,9 +609,11 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 			Color night_ambient(0.08f, 0.08f, 0.15f);
 			Color twilight_ambient(0.6f, 0.45f, 0.3f);
 			Color ambient = day_ambient.lerp(night_ambient, 1.0f - day_factor);
-			ambient = ambient.lerp(twilight_ambient, twilight * 0.5f);
+			ambient = ambient.lerp(twilight_ambient, twilight * 0.5f * (1.0f - overcast_amount));
+			float ambient_lum = ambient.get_luminance();
+			ambient = ambient.lerp(Color(ambient_lum, ambient_lum, ambient_lum), overcast_amount * 0.6f);
 			env->set_ambient_light_color(ambient);
-			env->set_ambient_light_energy(Math::lerp(0.15f, 0.5f, day_factor));
+			env->set_ambient_light_energy(Math::lerp(0.15f, 0.5f, day_factor) * diffuse_weather);
 
 			// Fog.
 			if (fog_enabled) {
@@ -588,8 +621,8 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 				env->set_fog_mode(Environment::FOG_MODE_DEPTH);
 
 				float draw_dist = chunk_load_radius * VoxelTerrainGenerator::CHUNK_SIZE_X * block_size;
-				float fog_end = draw_dist * fog_distance_ratio;
-				env->set_fog_depth_begin(fog_end * 0.7f);
+				float fog_end = draw_dist * fog_distance_ratio * Math::lerp(1.0f, 0.7f, overcast_amount);
+				env->set_fog_depth_begin(fog_end * Math::lerp(0.7f, 0.35f, overcast_amount));
 				env->set_fog_depth_end(fog_end);
 				env->set_fog_depth_curve(2.5f);
 
@@ -598,14 +631,16 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 				Color night_fog(0.02f, 0.02f, 0.08f);
 				Color twilight_fog(0.85f, 0.5f, 0.25f);
 				Color fog_color = day_fog.lerp(night_fog, 1.0f - day_factor);
-				fog_color = fog_color.lerp(twilight_fog, twilight * 0.6f);
+				fog_color = fog_color.lerp(twilight_fog, twilight * 0.6f * (1.0f - overcast_amount));
+				float fog_lum = fog_color.get_luminance();
+				fog_color = fog_color.lerp(Color(fog_lum, fog_lum, fog_lum * 1.04f), overcast_amount * 0.75f) * diffuse_weather;
 				// Darken fog in caves/dark areas based on local light level.
 				float fog_brightness = CLAMP(p_local_light, 0.04f, 1.0f);
 				fog_color = fog_color * fog_brightness;
 				env->set_fog_light_color(fog_color);
 
 				env->set_fog_light_energy(Math::lerp(0.3f, 1.0f, day_factor));
-				env->set_fog_sun_scatter(Math::lerp(0.0f, 0.8f, twilight) * p_local_light);
+				env->set_fog_sun_scatter(Math::lerp(0.0f, 0.8f, twilight) * p_local_light * (1.0f - overcast_amount));
 				env->set_fog_density(1.0f);
 				// Keep distance fog on world geometry without obscuring the shader sky.
 				env->set_fog_sky_affect(0.0f);
@@ -617,7 +652,7 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 
 	// Voxel chunk materials read this as a global shader uniform. Updating a
 	// single render-server parameter avoids touching every chunk surface.
-	_ensure_voxel_global_shader_parameter(day_factor);
+	_ensure_voxel_global_shader_parameter(day_factor * diffuse_weather);
 }
 
 void VoxelWorld::_notification(int p_what) {
@@ -784,22 +819,47 @@ void VoxelWorld::_initialize_world() {
 	// Create voxel lighting shader + material.
 	{
 		_ensure_voxel_global_shader_parameter(1.0f);
+		_ensure_cloud_global_shader_parameters();
 		voxel_shader.instantiate();
 		String shader_code = R"(
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
 uniform sampler2D texture_albedo : source_color, filter_nearest, repeat_enable;
 global uniform float voxel_sun_intensity;
+// Cloud weather map shared with the volumetric cloud renderer (R = base coverage).
+global uniform sampler2D cloud_weather_map : filter_linear, repeat_enable;
+// xy = wind offset (m), z = 1 / tile size, w = shadow strength (0 disables).
+global uniform vec4 cloud_shadow_params;
+// x = layer base, y = thickness, z = weather coverage, w = shadow height fraction.
+global uniform vec4 cloud_layer_params;
+global uniform vec3 cloud_sun_direction;
 uniform bool use_texture = false;
 varying vec4 voxel_light;
+varying vec3 world_pos;
 void vertex() {
 	voxel_light = CUSTOM0;
+	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+float cloud_shadow() {
+	if (cloud_shadow_params.w <= 0.0) {
+		return 1.0;
+	}
+	vec3 dir = cloud_sun_direction;
+	dir.y = max(dir.y, 0.15);
+	dir = normalize(dir);
+	float shadow_h = cloud_layer_params.x + cloud_layer_params.y * cloud_layer_params.w;
+	float t = max(shadow_h - world_pos.y, 0.0) / dir.y;
+	vec2 p = world_pos.xz + dir.xz * t;
+	float base_cov = texture(cloud_weather_map, (p - cloud_shadow_params.xy) * cloud_shadow_params.z).r;
+	float c = cloud_layer_params.z;
+	float cov = smoothstep(1.0 - c - 0.08, 1.0 - c + 0.14, base_cov);
+	return 1.0 - cov * cloud_shadow_params.w;
 }
 void fragment() {
 	vec4 base = use_texture ? texture(texture_albedo, UV) : vec4(1.0);
 	ALBEDO = base.rgb * COLOR.rgb;
 	// Sunlight modulation + AO. Block light is handled by OmniLight3D nodes.
-	float sun = voxel_light.r * voxel_sun_intensity;
+	float sun = voxel_light.r * voxel_sun_intensity * cloud_shadow();
 	float ao = voxel_light.b;
 	float brightness = sun * ao;
 	// Minimum ambient so caves are never pitch black.

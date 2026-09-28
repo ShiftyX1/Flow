@@ -65,6 +65,9 @@ private:
 	float fog_distance_ratio = 0.85f; // Fog end as fraction of draw distance.
 	float current_local_light = 1.0f; // Smoothed local light level at camera (0=dark cave, 1=full sun).
 
+	// --- Weather ---
+	float weather_light_multiplier = 1.0f; // 1 = clear sky, lower = overcast dimming of sun/ambient/fog.
+
 	// --- Environment node references (resolved from NodePath) ---
 	NodePath sun_path;
 	NodePath moon_path;
@@ -171,6 +174,7 @@ private:
 	Ref<ShaderMaterial> _get_voxel_shader_material(const Ref<Texture2D> &p_texture);
 	Ref<StandardMaterial3D> _get_standard_texture_material(const Ref<Texture2D> &p_texture, bool p_alpha_scissor);
 	void _ensure_voxel_global_shader_parameter(float p_value);
+	void _ensure_cloud_global_shader_parameters();
 
 	// Block-emitting light nodes (OmniLight3D per emissive block in loaded chunks).
 	HashMap<Vector3i, OmniLight3D *> block_lights;
@@ -321,6 +325,9 @@ public:
 
 	void set_fog_distance_ratio(float p_ratio);
 	float get_fog_distance_ratio() const { return fog_distance_ratio; }
+
+	void set_weather_light_multiplier(float p_multiplier);
+	float get_weather_light_multiplier() const { return weather_light_multiplier; }
 
 	void set_sun_path(const NodePath &p_path);
 	NodePath get_sun_path() const { return sun_path; }

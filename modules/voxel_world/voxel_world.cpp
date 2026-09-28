@@ -2492,6 +2492,16 @@ bool VoxelWorld::_load_world_objects_for_chunk(const Vector2i &p_key) {
 	return true;
 }
 
+bool VoxelWorld::_world_object_survives_chunk_unload(const WorldObjectEntry &p_object) const {
+	// Fast Travel targets must stay addressable after the player leaves their chunk.
+	// Landing Module ids and activated beacons are otherwise dropped with the chunk
+	// and later commands are rejected as an invalid destination.
+	if (p_object.type == StringName("landing_module") || (bool)p_object.state.get("permanent", false)) {
+		return true;
+	}
+	return p_object.type == StringName("emergency_beacon") && (bool)p_object.state.get("fast_travel_enabled", false);
+}
+
 void VoxelWorld::_remove_world_objects_in_chunk(const Vector2i &p_key, bool p_emit_signal) {
 	Vector<int64_t> ids;
 	const Vector<int64_t> *indexed = object_ids_by_chunk.getptr(p_key);
@@ -2499,6 +2509,10 @@ void VoxelWorld::_remove_world_objects_in_chunk(const Vector2i &p_key, bool p_em
 		ids = *indexed;
 	}
 	for (int i = 0; i < ids.size(); i++) {
+		const WorldObjectEntry *object = world_objects.getptr(ids[i]);
+		if (object != nullptr && _world_object_survives_chunk_unload(*object)) {
+			continue;
+		}
 		_remove_world_object_internal(ids[i], false, p_emit_signal);
 	}
 }

@@ -227,6 +227,7 @@ private:
 	void _queue_object_save_snapshot(const Vector2i &p_key);
 	Error _flush_dirty_saved_object_chunks(int p_max_chunks = -1);
 	bool _load_world_objects_for_chunk(const Vector2i &p_key);
+	bool _world_object_survives_chunk_unload(const WorldObjectEntry &p_object) const;
 	void _remove_world_objects_in_chunk(const Vector2i &p_key, bool p_emit_signal = false);
 
 	// Deterministic structure placement.

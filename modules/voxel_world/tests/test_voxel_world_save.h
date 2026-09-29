@@ -182,6 +182,48 @@ TEST_CASE("[VoxelWorld] Default content slice exposes restored forest beacon dat
 	CHECK(!(bool)archive_state["claimed"]);
 }
 
+TEST_CASE("[VoxelWorld] Structure placement rules round-trip and default to chance mode") {
+	Ref<VoxelStructureRegistry> structures;
+	structures.instantiate();
+	structures->setup_defaults();
+	REQUIRE(structures->get_structure_count() == 2);
+
+	Dictionary default_placement = structures->get_structure_placement(0);
+	CHECK(String(default_placement["mode"]) == "chance");
+
+	PackedStringArray avoid;
+	avoid.push_back("restored_forest_emergency_beacon");
+	Dictionary placement;
+	placement["mode"] = "lattice";
+	placement["cell_size"] = 360;
+	placement["jitter_min"] = 0.25;
+	placement["jitter_max"] = 0.75;
+	placement["occupancy"] = 0.6;
+	placement["min_distance_from_origin"] = 250;
+	placement["min_distance_to"] = 48;
+	placement["min_distance_to_names"] = avoid;
+	structures->set_structure_placement(1, placement);
+
+	Dictionary stored = structures->get_structure_placement(1);
+	CHECK(String(stored["mode"]) == "lattice");
+	CHECK((int)stored["cell_size"] == 360);
+	CHECK(Math::is_equal_approx((float)stored["occupancy"], 0.6f));
+	CHECK((int)stored["min_distance_from_origin"] == 250);
+	CHECK(structures->find_structure("restored_forest_emergency_beacon") == 0);
+	CHECK(structures->find_structure("missing") == -1);
+
+	// Out-of-range values are clamped instead of producing degenerate cells.
+	Dictionary invalid;
+	invalid["mode"] = "lattice";
+	invalid["cell_size"] = 1;
+	invalid["jitter_min"] = 0.9;
+	invalid["jitter_max"] = 0.1;
+	structures->set_structure_placement(0, invalid);
+	Dictionary clamped = structures->get_structure_placement(0);
+	CHECK((int)clamped["cell_size"] >= 16);
+	CHECK((float)clamped["jitter_max"] >= (float)clamped["jitter_min"]);
+}
+
 TEST_CASE("[VoxelWorld] Default block registry exposes iron and copper ore resources") {
 	Ref<VoxelBlockRegistry> blocks;
 	blocks.instantiate();

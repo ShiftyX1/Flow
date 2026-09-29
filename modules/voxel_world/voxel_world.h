@@ -230,8 +230,51 @@ private:
 	bool _world_object_survives_chunk_unload(const WorldObjectEntry &p_object) const;
 	void _remove_world_objects_in_chunk(const Vector2i &p_key, bool p_emit_signal = false);
 
+	// --- Landing crater + lattice structure placement (deterministic, main-thread only) ---
+	struct CraterConfig {
+		bool enabled = false;
+		int radius = 12; // Outer bowl radius in blocks.
+		int flat_radius = 6; // Flat landing pad radius in blocks.
+		int depth = 4; // Bowl depth below the natural surface in blocks.
+		int blend = 3; // Width of the transition back to natural terrain.
+		int core_block = VOXEL_BLOCK_STONE; // Block used for the inner pad.
+		int fill_block = VOXEL_BLOCK_DIRT; // Block used when the crater must fill low terrain.
+	};
+	struct LandingSite {
+		bool resolved = false;
+		int x = 0;
+		int z = 0;
+		int natural_y = 0;
+	};
+	struct LatticeSite {
+		bool valid = false;
+		Vector3i block_pos;
+	};
+	struct StructurePlacementSite {
+		Vector2i anchor_key;
+		int anchor_x = 0;
+		int anchor_y = 0;
+		int anchor_z = 0;
+	};
+	CraterConfig crater;
+	Callable structure_state_provider;
+	mutable Mutex placement_mutex;
+	mutable LandingSite landing_site_cache;
+	mutable HashMap<Vector3i, LatticeSite> lattice_site_cache;
+
+	void _reset_placement_caches();
+	LandingSite _resolve_landing_site() const;
+	bool _landing_candidate_ok(int p_x, int p_z) const;
+	bool _site_terrain_ok(const VoxelStructureRegistry::Placement &p_placement, int p_x, int p_z) const;
+	bool _lattice_site(int p_structure_id, const Vector2i &p_cell, LatticeSite &r_site) const;
+	void _collect_structure_sites(int p_structure_id, const Vector2i &p_chunk_key, Vector<StructurePlacementSite> &r_sites) const;
+	int64_t _structure_object_id(int p_structure_id, const Vector2i &p_anchor_key) const;
+	int _crater_target_y(const LandingSite &p_site, int p_x, int p_z, int p_natural_top) const;
+	bool _apply_landing_crater_to_chunk(const Vector2i &p_key, VoxelChunk *p_chunk);
+
 	// Deterministic structure placement.
 	uint32_t _hash_structure_anchor(int p_structure_id, const Vector2i &p_anchor_key, uint32_t p_salt = 0) const;
+	uint32_t _hash_lattice_cell(int p_structure_id, const Vector2i &p_cell, uint32_t p_salt = 0) const;
 	bool _structure_should_place(int p_structure_id, const Vector2i &p_anchor_key) const;
 	int _select_structure_rotation(const VoxelStructureRegistry::StructureEntry &p_entry, int p_structure_id, const Vector2i &p_anchor_key) const;
 	Vector3i _rotate_structure_local(const Vector3i &p_local, const Vector3i &p_size, int p_rotation) const;
@@ -349,6 +392,16 @@ public:
 	String get_block_name_at(const Vector3 &p_world_pos) const;
 	// Get generated surface height at block-grid X/Z. Falls back to sea level before initialization.
 	int get_surface_y_at(int p_world_x, int p_world_z) const;
+	// Map sample: (surface_y, biome_index, is_water_influenced) at block-grid X/Z without loading chunks.
+	Vector3i get_terrain_sample(int p_world_x, int p_world_z) const;
+
+	// Landing crater and deterministic structure sites.
+	void set_landing_crater_config(const Dictionary &p_config);
+	Dictionary get_landing_crater_config() const;
+	Dictionary get_landing_site() const;
+	Array get_structure_sites_in_rect(const Rect2i &p_rect, const String &p_structure_name = String()) const;
+	void set_structure_state_provider(const Callable &p_provider);
+	Callable get_structure_state_provider() const { return structure_state_provider; }
 
 	// Get biome index (dominant biome) at a world position. Returns -1 before world is initialized.
 	int get_biome_at(const Vector3 &p_world_pos) const;

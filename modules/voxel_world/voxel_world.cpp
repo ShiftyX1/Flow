@@ -96,6 +96,13 @@ void VoxelWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_block_at", "world_pos", "block_id"), &VoxelWorld::set_block_at);
 	ClassDB::bind_method(D_METHOD("get_block_name_at", "world_pos"), &VoxelWorld::get_block_name_at);
 	ClassDB::bind_method(D_METHOD("get_surface_y_at", "world_x", "world_z"), &VoxelWorld::get_surface_y_at);
+	ClassDB::bind_method(D_METHOD("get_terrain_sample", "world_x", "world_z"), &VoxelWorld::get_terrain_sample);
+	ClassDB::bind_method(D_METHOD("set_landing_crater_config", "config"), &VoxelWorld::set_landing_crater_config);
+	ClassDB::bind_method(D_METHOD("get_landing_crater_config"), &VoxelWorld::get_landing_crater_config);
+	ClassDB::bind_method(D_METHOD("get_landing_site"), &VoxelWorld::get_landing_site);
+	ClassDB::bind_method(D_METHOD("get_structure_sites_in_rect", "rect", "structure_name"), &VoxelWorld::get_structure_sites_in_rect, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("set_structure_state_provider", "provider"), &VoxelWorld::set_structure_state_provider);
+	ClassDB::bind_method(D_METHOD("get_structure_state_provider"), &VoxelWorld::get_structure_state_provider);
 	ClassDB::bind_method(D_METHOD("get_biome_at", "world_pos"), &VoxelWorld::get_biome_at);
 	ClassDB::bind_method(D_METHOD("get_biome_name_at", "world_pos"), &VoxelWorld::get_biome_name_at);
 	ClassDB::bind_method(D_METHOD("add_world_object", "type", "block_pos", "rotation_y", "state", "blocking"), &VoxelWorld::add_world_object, DEFVAL(0.0f), DEFVAL(Dictionary()), DEFVAL(false));
@@ -200,6 +207,7 @@ VoxelWorld::~VoxelWorld() {
 
 void VoxelWorld::set_seed(int p_seed) {
 	seed = p_seed;
+	_reset_placement_caches();
 }
 
 void VoxelWorld::set_chunk_load_radius(int p_radius) {
@@ -265,6 +273,7 @@ Ref<VoxelBiomeRegistry> VoxelWorld::get_biome_registry() const {
 
 void VoxelWorld::set_structure_registry(const Ref<VoxelStructureRegistry> &p_registry) {
 	structure_registry = p_registry;
+	_reset_placement_caches();
 }
 
 Ref<VoxelStructureRegistry> VoxelWorld::get_structure_registry() const {
@@ -739,6 +748,7 @@ void VoxelWorld::_initialize_world() {
 	}
 	generator->set_seed(effective_seed);
 	generator->set_sea_level(sea_level);
+	_reset_placement_caches();
 
 	if (biome_registry.is_null()) {
 		biome_registry.instantiate();
@@ -934,6 +944,7 @@ void VoxelWorld::_cleanup_world() {
 	if (generator) {
 		memdelete(generator);
 		generator = nullptr;
+		_reset_placement_caches();
 	}
 
 	material.unref();
@@ -2126,6 +2137,7 @@ Error VoxelWorld::create_world_save(const String &p_save_dir, const String &p_di
 		resolved_seed = Math::random(0, 2147483647);
 	}
 	seed = resolved_seed;
+	_reset_placement_caches();
 	start_time_of_day = time_of_day;
 	world_save_dir = p_save_dir;
 	world_save_player_state = p_player_state;
@@ -2174,6 +2186,7 @@ Error VoxelWorld::load_world_save(const String &p_save_dir) {
 	object_ids_by_chunk.clear();
 	next_world_object_id = 1;
 	seed = (int)world_save_metadata.get("seed", seed);
+	_reset_placement_caches();
 	const float loaded_time = (float)(double)world_save_metadata.get("world_time", world_save_metadata.get("time_of_day", (double)start_time_of_day));
 	set_start_time_of_day(loaded_time);
 	set_time_of_day(loaded_time);
@@ -2630,6 +2643,16 @@ uint32_t VoxelWorld::_hash_structure_anchor(int p_structure_id, const Vector2i &
 	return _voxel_world_mix_u32(h);
 }
 
+// Lattice sites and generated object ids need a hash without the (x, z) <-> (-x, -z) symmetry of
+// _hash_structure_anchor (odd multipliers XORed together), so every component is mixed in turn.
+uint32_t VoxelWorld::_hash_lattice_cell(int p_structure_id, const Vector2i &p_cell, uint32_t p_salt) const {
+	uint32_t h = _voxel_world_mix_u32((uint32_t)seed ^ 0x51ed270bU);
+	h = _voxel_world_mix_u32(h ^ ((uint32_t)p_structure_id * 0x9e3779b9U));
+	h = _voxel_world_mix_u32(h ^ (uint32_t)p_cell.x);
+	h = _voxel_world_mix_u32(h ^ ((uint32_t)p_cell.y * 0x85ebca6bU));
+	return _voxel_world_mix_u32(h ^ (p_salt * 0x27d4eb2dU));
+}
+
 bool VoxelWorld::_structure_should_place(int p_structure_id, const Vector2i &p_anchor_key) const {
 	if (structure_registry.is_null() || !structure_registry->has_structure(p_structure_id)) {
 		return false;
@@ -2683,62 +2706,411 @@ Vector3i VoxelWorld::_rotate_structure_local(const Vector3i &p_local, const Vect
 	}
 }
 
-bool VoxelWorld::_apply_structures_to_chunk(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_blocks_from_save) {
-	if (p_blocks_from_save || p_chunk == nullptr || structure_registry.is_null() || structure_registry->get_structure_count() == 0 || generator == nullptr) {
+static int _voxel_world_floor_div(int p_value, int p_divisor) {
+	int q = p_value / p_divisor;
+	if ((p_value % p_divisor != 0) && ((p_value < 0) != (p_divisor < 0))) {
+		q--;
+	}
+	return q;
+}
+
+static bool _voxel_world_is_non_terrain_block(int p_block_id) {
+	return p_block_id == VOXEL_BLOCK_AIR || p_block_id == VOXEL_BLOCK_LEAVES || p_block_id == VOXEL_BLOCK_WOOD ||
+			p_block_id == VOXEL_BLOCK_BIOLUMEN_PLANT || p_block_id == VOXEL_BLOCK_TORCH;
+}
+
+void VoxelWorld::_reset_placement_caches() {
+	MutexLock lock(placement_mutex);
+	landing_site_cache = LandingSite();
+	lattice_site_cache.clear();
+}
+
+int64_t VoxelWorld::_structure_object_id(int p_structure_id, const Vector2i &p_anchor_key) const {
+	const uint32_t id_hi = _hash_lattice_cell(p_structure_id, p_anchor_key, 100);
+	const uint32_t id_lo = _hash_lattice_cell(p_structure_id, p_anchor_key, 101);
+	int64_t object_id = -((int64_t)((((uint64_t)id_hi) << 32) | id_lo) & 0x7FFFFFFFFFFFFFFFLL);
+	if (object_id == 0) {
+		object_id = -1;
+	}
+	return object_id;
+}
+
+bool VoxelWorld::_landing_candidate_ok(int p_x, int p_z) const {
+	const int h0 = generator->get_surface_y_at(p_x, p_z);
+	if (h0 < sea_level + 3 || h0 > VoxelChunk::SIZE_Y - 40 || generator->is_water_influenced_at(p_x, p_z)) {
+		return false;
+	}
+	const int outer = crater.radius + crater.blend + 3;
+	const int radii[2] = { outer / 2, outer };
+	for (int ri = 0; ri < 2; ri++) {
+		for (int i = 0; i < 8; i++) {
+			const float angle = (float)i * (Math::TAU / 8.0f);
+			const int sx = p_x + (int)Math::round(Math::cos(angle) * (float)radii[ri]);
+			const int sz = p_z + (int)Math::round(Math::sin(angle) * (float)radii[ri]);
+			const int h = generator->get_surface_y_at(sx, sz);
+			if (Math::abs(h - h0) > 3 || h < sea_level + 2 || generator->is_water_influenced_at(sx, sz)) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+VoxelWorld::LandingSite VoxelWorld::_resolve_landing_site() const {
+	LandingSite site;
+	if (generator == nullptr) {
+		site.resolved = false;
+		site.natural_y = sea_level;
+		return site;
+	}
+	{
+		MutexLock lock(placement_mutex);
+		if (landing_site_cache.resolved) {
+			return landing_site_cache;
+		}
+	}
+	// Square spiral around the world origin until a dry, gentle site is found.
+	const int step = 10;
+	const int max_ring = 48;
+	bool found = false;
+	int fx = 0;
+	int fz = 0;
+	for (int ring = 0; ring <= max_ring && !found; ring++) {
+		const int d = ring * step;
+		if (ring == 0) {
+			if (_landing_candidate_ok(0, 0)) {
+				found = true;
+			}
+			continue;
+		}
+		for (int i = -ring; i <= ring && !found; i++) {
+			const int ox = i * step;
+			const Vector2i candidates[4] = { Vector2i(ox, -d), Vector2i(ox, d), Vector2i(-d, ox), Vector2i(d, ox) };
+			for (int c = 0; c < 4; c++) {
+				if (_landing_candidate_ok(candidates[c].x, candidates[c].y)) {
+					fx = candidates[c].x;
+					fz = candidates[c].y;
+					found = true;
+					break;
+				}
+			}
+		}
+	}
+	if (!found) {
+		WARN_PRINT("[VoxelWorld] No gentle dry landing site found near the origin; using (0, 0).");
+		fx = 0;
+		fz = 0;
+	}
+	site.resolved = true;
+	site.x = fx;
+	site.z = fz;
+	site.natural_y = generator->get_surface_y_at(fx, fz);
+	MutexLock lock(placement_mutex);
+	landing_site_cache = site;
+	return site;
+}
+
+bool VoxelWorld::_site_terrain_ok(const VoxelStructureRegistry::Placement &p_placement, int p_x, int p_z) const {
+	const int h = generator->get_surface_y_at(p_x, p_z);
+	if (h < sea_level + p_placement.min_height_above_sea || generator->is_water_influenced_at(p_x, p_z)) {
+		return false;
+	}
+	const int r = p_placement.footprint_radius;
+	if (r <= 0) {
+		return true;
+	}
+	const Vector2i offsets[8] = { Vector2i(r, 0), Vector2i(-r, 0), Vector2i(0, r), Vector2i(0, -r), Vector2i(r, r), Vector2i(-r, r), Vector2i(r, -r), Vector2i(-r, -r) };
+	for (int i = 0; i < 8; i++) {
+		const int sx = p_x + offsets[i].x;
+		const int sz = p_z + offsets[i].y;
+		if (Math::abs(generator->get_surface_y_at(sx, sz) - h) > p_placement.max_slope || generator->is_water_influenced_at(sx, sz)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool VoxelWorld::_lattice_site(int p_structure_id, const Vector2i &p_cell, LatticeSite &r_site) const {
+	r_site = LatticeSite();
+	if (generator == nullptr || structure_registry.is_null() || !structure_registry->has_structure(p_structure_id)) {
+		return false;
+	}
+	const Vector3i cache_key(p_structure_id, p_cell.x, p_cell.y);
+	{
+		MutexLock lock(placement_mutex);
+		const LatticeSite *cached = lattice_site_cache.getptr(cache_key);
+		if (cached != nullptr) {
+			r_site = *cached;
+			return cached->valid;
+		}
+	}
+
+	const VoxelStructureRegistry::StructureEntry &entry = structure_registry->get_structures()[p_structure_id];
+	const VoxelStructureRegistry::Placement &placement = entry.placement;
+	LatticeSite site;
+	if (placement.lattice) {
+		const uint32_t occupancy_hash = _hash_lattice_cell(p_structure_id, p_cell, 300);
+		if ((float)(occupancy_hash & 0xFFFFu) / 65536.0f < placement.occupancy) {
+			const LandingSite landing = _resolve_landing_site();
+			for (int attempt = 0; attempt < placement.max_attempts && !site.valid; attempt++) {
+				const uint32_t hx = _hash_lattice_cell(p_structure_id, p_cell, 400 + attempt * 2);
+				const uint32_t hz = _hash_lattice_cell(p_structure_id, p_cell, 401 + attempt * 2);
+				const float jitter_range = placement.jitter_max - placement.jitter_min;
+				const float fx = placement.jitter_min + ((float)(hx & 0xFFFFu) / 65536.0f) * jitter_range;
+				const float fz = placement.jitter_min + ((float)(hz & 0xFFFFu) / 65536.0f) * jitter_range;
+				const int x = p_cell.x * placement.cell_size + (int)(fx * (float)placement.cell_size);
+				const int z = p_cell.y * placement.cell_size + (int)(fz * (float)placement.cell_size);
+
+				if (placement.min_distance_from_origin > 0) {
+					if (Vector2((float)(x - landing.x), (float)(z - landing.z)).length() < (float)placement.min_distance_from_origin) {
+						continue;
+					}
+				}
+				if (!entry.biome_tags.is_empty()) {
+					const int biome_id = generator->get_biome_index_at(x, z);
+					String biome_name;
+					if (biome_registry.is_valid() && biome_id >= 0 && biome_id < biome_registry->get_biome_count()) {
+						biome_name = biome_registry->get_biome_name(biome_id);
+					}
+					if (biome_name.is_empty() || !_packed_string_array_has(entry.biome_tags, biome_name)) {
+						continue;
+					}
+				}
+				if (!_site_terrain_ok(placement, x, z)) {
+					continue;
+				}
+				bool too_close = false;
+				if (placement.min_distance_to > 0) {
+					for (int ni = 0; ni < placement.min_distance_to_names.size() && !too_close; ni++) {
+						const int other_id = structure_registry->find_structure(placement.min_distance_to_names[ni]);
+						if (other_id < 0 || other_id >= p_structure_id) {
+							continue; // Only earlier structures can be referenced; keeps evaluation acyclic.
+						}
+						const VoxelStructureRegistry::Placement &other = structure_registry->get_structures()[other_id].placement;
+						if (!other.lattice) {
+							continue;
+						}
+						const int reach = placement.min_distance_to / other.cell_size + 1;
+						const int ocx = _voxel_world_floor_div(x, other.cell_size);
+						const int ocz = _voxel_world_floor_div(z, other.cell_size);
+						for (int cx = ocx - reach; cx <= ocx + reach && !too_close; cx++) {
+							for (int cz = ocz - reach; cz <= ocz + reach; cz++) {
+								LatticeSite other_site;
+								if (!_lattice_site(other_id, Vector2i(cx, cz), other_site)) {
+									continue;
+								}
+								if (Vector2((float)(x - other_site.block_pos.x), (float)(z - other_site.block_pos.z)).length() < (float)placement.min_distance_to) {
+									too_close = true;
+									break;
+								}
+							}
+						}
+					}
+				}
+				if (too_close) {
+					continue;
+				}
+				site.valid = true;
+				site.block_pos = Vector3i(x, CLAMP(generator->get_surface_y_at(x, z) + 1, 1, VoxelChunk::SIZE_Y - 1), z);
+			}
+		}
+	}
+	{
+		MutexLock lock(placement_mutex);
+		lattice_site_cache[cache_key] = site;
+	}
+	r_site = site;
+	return site.valid;
+}
+
+void VoxelWorld::_collect_structure_sites(int p_structure_id, const Vector2i &p_chunk_key, Vector<StructurePlacementSite> &r_sites) const {
+	if (generator == nullptr || structure_registry.is_null() || !structure_registry->has_structure(p_structure_id)) {
+		return;
+	}
+	const VoxelStructureRegistry::StructureEntry &entry = structure_registry->get_structures()[p_structure_id];
+	const Vector3i size = entry.voxel_data.is_valid() ? entry.voxel_data->get_size() : entry.size;
+	const int extent = MAX(MAX(size.x, size.z), 1);
+
+	if (entry.placement.lattice) {
+		const int cell_size = entry.placement.cell_size;
+		const int min_x = p_chunk_key.x * VoxelChunk::SIZE_X - extent;
+		const int max_x = p_chunk_key.x * VoxelChunk::SIZE_X + VoxelChunk::SIZE_X - 1 + extent;
+		const int min_z = p_chunk_key.y * VoxelChunk::SIZE_Z - extent;
+		const int max_z = p_chunk_key.y * VoxelChunk::SIZE_Z + VoxelChunk::SIZE_Z - 1 + extent;
+		for (int cx = _voxel_world_floor_div(min_x, cell_size); cx <= _voxel_world_floor_div(max_x, cell_size); cx++) {
+			for (int cz = _voxel_world_floor_div(min_z, cell_size); cz <= _voxel_world_floor_div(max_z, cell_size); cz++) {
+				LatticeSite site;
+				if (!_lattice_site(p_structure_id, Vector2i(cx, cz), site)) {
+					continue;
+				}
+				StructurePlacementSite placement_site;
+				placement_site.anchor_key = Vector2i(cx, cz);
+				placement_site.anchor_x = site.block_pos.x;
+				placement_site.anchor_y = site.block_pos.y;
+				placement_site.anchor_z = site.block_pos.z;
+				r_sites.push_back(placement_site);
+			}
+		}
+		return;
+	}
+
+	if (entry.rarity <= 0) {
+		return;
+	}
+	const int candidate_radius = extent / VoxelChunk::SIZE_X + 2;
+	for (int ax = p_chunk_key.x - candidate_radius; ax <= p_chunk_key.x + candidate_radius; ax++) {
+		for (int az = p_chunk_key.y - candidate_radius; az <= p_chunk_key.y + candidate_radius; az++) {
+			const Vector2i anchor_key(ax, az);
+			if (!_structure_should_place(p_structure_id, anchor_key)) {
+				continue;
+			}
+			const uint32_t h = _hash_structure_anchor(p_structure_id, anchor_key, 2);
+			const int local_x = (int)(h % VoxelChunk::SIZE_X);
+			const int local_z = (int)((h >> 8) % VoxelChunk::SIZE_Z);
+			StructurePlacementSite placement_site;
+			placement_site.anchor_key = anchor_key;
+			placement_site.anchor_x = anchor_key.x * VoxelChunk::SIZE_X + local_x;
+			placement_site.anchor_z = anchor_key.y * VoxelChunk::SIZE_Z + local_z;
+			placement_site.anchor_y = CLAMP(generator->get_surface_y_at(placement_site.anchor_x, placement_site.anchor_z) + 1, 1, VoxelChunk::SIZE_Y - 1);
+			r_sites.push_back(placement_site);
+		}
+	}
+}
+
+int VoxelWorld::_crater_target_y(const LandingSite &p_site, int p_x, int p_z, int p_natural_top) const {
+	const float dx = (float)(p_x - p_site.x);
+	const float dz = (float)(p_z - p_site.z);
+	const float r = Math::sqrt(dx * dx + dz * dz);
+	const float radius = (float)crater.radius;
+	const float flat = (float)MIN(crater.flat_radius, crater.radius);
+	const float blend = (float)MAX(crater.blend, 1);
+	if (r > radius + blend + 0.5f) {
+		return INT32_MIN;
+	}
+	int target;
+	if (r <= flat) {
+		target = p_site.natural_y - crater.depth;
+	} else if (r <= radius) {
+		const float t = (r - flat) / MAX(radius - flat, 0.001f);
+		target = p_site.natural_y - (int)Math::round((float)crater.depth * (1.0f - t * t));
+	} else {
+		float t = CLAMP((r - radius) / blend, 0.0f, 1.0f);
+		t = t * t * (3.0f - 2.0f * t);
+		target = (int)Math::round(Math::lerp((float)p_site.natural_y, (float)p_natural_top, t));
+	}
+	// Low ejecta lip around the rim.
+	if (r > radius - 1.5f && r <= radius + 0.5f) {
+		target += 1;
+	}
+	return target;
+}
+
+bool VoxelWorld::_apply_landing_crater_to_chunk(const Vector2i &p_key, VoxelChunk *p_chunk) {
+	if (!crater.enabled || p_chunk == nullptr || generator == nullptr) {
+		return false;
+	}
+	const LandingSite site = _resolve_landing_site();
+	const int reach = crater.radius + crater.blend + 1;
+	const int x0 = p_key.x * VoxelChunk::SIZE_X;
+	const int z0 = p_key.y * VoxelChunk::SIZE_Z;
+	if (x0 + VoxelChunk::SIZE_X - 1 < site.x - reach || x0 > site.x + reach || z0 + VoxelChunk::SIZE_Z - 1 < site.z - reach || z0 > site.z + reach) {
 		return false;
 	}
 
 	bool modified = false;
+	for (int lx = 0; lx < VoxelChunk::SIZE_X; lx++) {
+		for (int lz = 0; lz < VoxelChunk::SIZE_Z; lz++) {
+			const int wx = x0 + lx;
+			const int wz = z0 + lz;
+			int top = 0;
+			for (int y = VoxelChunk::SIZE_Y - 1; y >= 1; y--) {
+				if (!_voxel_world_is_non_terrain_block((int)p_chunk->get_block(lx, y, lz))) {
+					top = y;
+					break;
+				}
+			}
+			int target = _crater_target_y(site, wx, wz, top);
+			if (target == INT32_MIN) {
+				continue;
+			}
+			target = CLAMP(target, 2, VoxelChunk::SIZE_Y - 8);
+
+			if (top < target) {
+				for (int y = top + 1; y <= target; y++) {
+					p_chunk->set_block(lx, y, lz, (uint16_t)crater.fill_block);
+				}
+				modified = true;
+			}
+			// Remove terrain above the target and any foliage that would be left hanging.
+			for (int y = target + 1; y < VoxelChunk::SIZE_Y; y++) {
+				const int block_id = (int)p_chunk->get_block(lx, y, lz);
+				if (block_id == VOXEL_BLOCK_AIR) {
+					continue;
+				}
+				if (y <= top || _voxel_world_is_non_terrain_block(block_id)) {
+					p_chunk->set_block(lx, y, lz, VOXEL_BLOCK_AIR);
+					modified = true;
+				}
+			}
+			const float dx = (float)(wx - site.x);
+			const float dz = (float)(wz - site.z);
+			if (Math::sqrt(dx * dx + dz * dz) <= (float)crater.flat_radius * 0.5f) {
+				p_chunk->set_block(lx, target, lz, (uint16_t)crater.core_block);
+				modified = true;
+			}
+		}
+	}
+	return modified;
+}
+
+bool VoxelWorld::_apply_structures_to_chunk(const Vector2i &p_key, VoxelChunk *p_chunk, bool p_blocks_from_save) {
+	if (p_blocks_from_save || p_chunk == nullptr || generator == nullptr) {
+		return false;
+	}
+	bool modified = _apply_landing_crater_to_chunk(p_key, p_chunk);
+	if (structure_registry.is_null() || structure_registry->get_structure_count() == 0) {
+		return modified;
+	}
+
 	const Vector<VoxelStructureRegistry::StructureEntry> &entries = structure_registry->get_structures();
 	for (int si = 0; si < entries.size(); si++) {
 		const VoxelStructureRegistry::StructureEntry &entry = entries[si];
-		if (entry.voxel_data.is_null() || entry.rarity <= 0) {
+		if (entry.voxel_data.is_null() || (!entry.placement.lattice && entry.rarity <= 0)) {
 			continue;
 		}
 		const Vector3i size = entry.voxel_data->get_size();
 		if (size.x <= 0 || size.y <= 0 || size.z <= 0) {
 			continue;
 		}
-		const int candidate_radius = MAX(size.x, size.z) / VoxelChunk::SIZE_X + 2;
-		for (int ax = p_key.x - candidate_radius; ax <= p_key.x + candidate_radius; ax++) {
-			for (int az = p_key.y - candidate_radius; az <= p_key.y + candidate_radius; az++) {
-				const Vector2i anchor_key(ax, az);
-				if (!_structure_should_place(si, anchor_key)) {
-					continue;
-				}
+		Vector<StructurePlacementSite> sites;
+		_collect_structure_sites(si, p_key, sites);
+		for (int i = 0; i < sites.size(); i++) {
+			const StructurePlacementSite &site = sites[i];
+			const int rotation = _select_structure_rotation(entry, si, site.anchor_key);
+			const Vector3i rotated_anchor = _rotate_structure_local(entry.anchor, size, rotation);
+			const Vector3i world_origin(site.anchor_x - rotated_anchor.x, site.anchor_y - rotated_anchor.y, site.anchor_z - rotated_anchor.z);
 
-				const uint32_t h = _hash_structure_anchor(si, anchor_key, 2);
-				const int local_x = (int)(h % VoxelChunk::SIZE_X);
-				const int local_z = (int)((h >> 8) % VoxelChunk::SIZE_Z);
-				const int anchor_x = anchor_key.x * VoxelChunk::SIZE_X + local_x;
-				const int anchor_z = anchor_key.y * VoxelChunk::SIZE_Z + local_z;
-				const int anchor_y = CLAMP(generator->get_surface_y_at(anchor_x, anchor_z) + 1, 1, VoxelChunk::SIZE_Y - 1);
-				const int rotation = _select_structure_rotation(entry, si, anchor_key);
-				const Vector3i rotated_anchor = _rotate_structure_local(entry.anchor, size, rotation);
-				const Vector3i world_origin(anchor_x - rotated_anchor.x, anchor_y - rotated_anchor.y, anchor_z - rotated_anchor.z);
-
-				const Vector<uint16_t> &template_blocks = entry.voxel_data->get_blocks_array();
-				for (int y = 0; y < size.y; y++) {
-					for (int z = 0; z < size.z; z++) {
-						for (int x = 0; x < size.x; x++) {
-							const int template_index = entry.voxel_data->index_of(x, y, z);
-							const uint16_t block_id = template_blocks[template_index];
-							if (block_id == VOXEL_BLOCK_AIR) {
-								continue;
-							}
-							const Vector3i rotated = _rotate_structure_local(Vector3i(x, y, z), size, rotation);
-							const Vector3i world_pos = world_origin + rotated;
-							if (_block_to_chunk(world_pos) != p_key || world_pos.y < 0 || world_pos.y >= VoxelChunk::SIZE_Y) {
-								continue;
-							}
-							const int lx = world_pos.x - p_key.x * VoxelChunk::SIZE_X;
-							const int lz = world_pos.z - p_key.y * VoxelChunk::SIZE_Z;
-							if (lx < 0 || lx >= VoxelChunk::SIZE_X || lz < 0 || lz >= VoxelChunk::SIZE_Z) {
-								continue;
-							}
-							p_chunk->set_block(lx, world_pos.y, lz, block_id);
-							modified = true;
+			const Vector<uint16_t> &template_blocks = entry.voxel_data->get_blocks_array();
+			for (int y = 0; y < size.y; y++) {
+				for (int z = 0; z < size.z; z++) {
+					for (int x = 0; x < size.x; x++) {
+						const int template_index = entry.voxel_data->index_of(x, y, z);
+						const uint16_t block_id = template_blocks[template_index];
+						if (block_id == VOXEL_BLOCK_AIR) {
+							continue;
 						}
+						const Vector3i rotated = _rotate_structure_local(Vector3i(x, y, z), size, rotation);
+						const Vector3i world_pos = world_origin + rotated;
+						if (_block_to_chunk(world_pos) != p_key || world_pos.y < 0 || world_pos.y >= VoxelChunk::SIZE_Y) {
+							continue;
+						}
+						const int lx = world_pos.x - p_key.x * VoxelChunk::SIZE_X;
+						const int lz = world_pos.z - p_key.y * VoxelChunk::SIZE_Z;
+						if (lx < 0 || lx >= VoxelChunk::SIZE_X || lz < 0 || lz >= VoxelChunk::SIZE_Z) {
+							continue;
+						}
+						p_chunk->set_block(lx, world_pos.y, lz, block_id);
+						modified = true;
 					}
 				}
 			}
@@ -2754,49 +3126,136 @@ void VoxelWorld::_generate_structure_objects_for_chunk(const Vector2i &p_key) {
 	const Vector<VoxelStructureRegistry::StructureEntry> &entries = structure_registry->get_structures();
 	for (int si = 0; si < entries.size(); si++) {
 		const VoxelStructureRegistry::StructureEntry &entry = entries[si];
-		if (entry.world_object_type == StringName() || entry.rarity <= 0) {
+		if (entry.world_object_type == StringName() || (!entry.placement.lattice && entry.rarity <= 0)) {
 			continue;
 		}
-		const Vector3i size = entry.voxel_data.is_valid() ? entry.voxel_data->get_size() : entry.size;
-		const int candidate_radius = MAX(MAX(size.x, size.z), 1) / VoxelChunk::SIZE_X + 2;
-		for (int ax = p_key.x - candidate_radius; ax <= p_key.x + candidate_radius; ax++) {
-			for (int az = p_key.y - candidate_radius; az <= p_key.y + candidate_radius; az++) {
-				const Vector2i anchor_key(ax, az);
-				if (!_structure_should_place(si, anchor_key)) {
+		Vector<StructurePlacementSite> sites;
+		_collect_structure_sites(si, p_key, sites);
+		for (int i = 0; i < sites.size(); i++) {
+			const StructurePlacementSite &site = sites[i];
+			const Vector3i object_pos(site.anchor_x, site.anchor_y, site.anchor_z);
+			if (_block_to_chunk(object_pos) != p_key) {
+				continue;
+			}
+
+			const int64_t object_id = _structure_object_id(si, site.anchor_key);
+			Dictionary state = entry.world_object_state.duplicate(true);
+			state["structure_name"] = entry.name;
+			state["generated"] = true;
+			if (structure_state_provider.is_valid()) {
+				Variant provided = structure_state_provider.call(entry.name, object_pos, object_id, state);
+				if (provided.get_type() == Variant::DICTIONARY) {
+					state = provided;
+				}
+			}
+
+			WorldObjectEntry object;
+			object.id = object_id;
+			object.type = entry.world_object_type;
+			object.block_pos = object_pos;
+			object.rotation_y = (float)_select_structure_rotation(entry, si, site.anchor_key);
+			object.state = state;
+			object.blocking = entry.world_object_blocking;
+			_add_world_object_internal(object, false, true);
+		}
+	}
+}
+
+void VoxelWorld::set_landing_crater_config(const Dictionary &p_config) {
+	CraterConfig next;
+	next.enabled = (bool)p_config.get("enabled", true);
+	next.radius = CLAMP((int)p_config.get("radius", next.radius), 4, 64);
+	next.flat_radius = CLAMP((int)p_config.get("flat_radius", next.flat_radius), 1, next.radius);
+	next.depth = CLAMP((int)p_config.get("depth", next.depth), 1, 16);
+	next.blend = CLAMP((int)p_config.get("blend", next.blend), 1, 16);
+	next.core_block = (int)p_config.get("core_block", next.core_block);
+	next.fill_block = (int)p_config.get("fill_block", next.fill_block);
+	crater = next;
+	_reset_placement_caches();
+}
+
+Dictionary VoxelWorld::get_landing_crater_config() const {
+	Dictionary d;
+	d["enabled"] = crater.enabled;
+	d["radius"] = crater.radius;
+	d["flat_radius"] = crater.flat_radius;
+	d["depth"] = crater.depth;
+	d["blend"] = crater.blend;
+	d["core_block"] = crater.core_block;
+	d["fill_block"] = crater.fill_block;
+	return d;
+}
+
+Dictionary VoxelWorld::get_landing_site() const {
+	const LandingSite site = _resolve_landing_site();
+	const int floor_y = site.natural_y - (crater.enabled ? crater.depth : 0);
+	Dictionary d;
+	d["resolved"] = site.resolved;
+	d["x"] = site.x;
+	d["z"] = site.z;
+	d["natural_y"] = site.natural_y;
+	d["floor_y"] = floor_y;
+	d["block_pos"] = Vector3i(site.x, floor_y + 1, site.z);
+	d["crater_enabled"] = crater.enabled;
+	d["radius"] = crater.radius;
+	d["flat_radius"] = crater.flat_radius;
+	d["depth"] = crater.depth;
+	return d;
+}
+
+Array VoxelWorld::get_structure_sites_in_rect(const Rect2i &p_rect, const String &p_structure_name) const {
+	Array result;
+	if (generator == nullptr || structure_registry.is_null() || p_rect.size.x <= 0 || p_rect.size.y <= 0) {
+		return result;
+	}
+	const Vector<VoxelStructureRegistry::StructureEntry> &entries = structure_registry->get_structures();
+	for (int si = 0; si < entries.size(); si++) {
+		const VoxelStructureRegistry::StructureEntry &entry = entries[si];
+		if (!entry.placement.lattice || (!p_structure_name.is_empty() && entry.name != p_structure_name)) {
+			continue;
+		}
+		const int cell_size = entry.placement.cell_size;
+		const int min_cx = _voxel_world_floor_div(p_rect.position.x, cell_size);
+		const int max_cx = _voxel_world_floor_div(p_rect.position.x + p_rect.size.x - 1, cell_size);
+		const int min_cz = _voxel_world_floor_div(p_rect.position.y, cell_size);
+		const int max_cz = _voxel_world_floor_div(p_rect.position.y + p_rect.size.y - 1, cell_size);
+		ERR_CONTINUE_MSG((int64_t)(max_cx - min_cx + 1) * (int64_t)(max_cz - min_cz + 1) > 16384, "Structure site query rect is too large.");
+		for (int cx = min_cx; cx <= max_cx; cx++) {
+			for (int cz = min_cz; cz <= max_cz; cz++) {
+				LatticeSite site;
+				if (!_lattice_site(si, Vector2i(cx, cz), site)) {
 					continue;
 				}
-				const uint32_t h = _hash_structure_anchor(si, anchor_key, 2);
-				const int local_x = (int)(h % VoxelChunk::SIZE_X);
-				const int local_z = (int)((h >> 8) % VoxelChunk::SIZE_Z);
-				const int anchor_x = anchor_key.x * VoxelChunk::SIZE_X + local_x;
-				const int anchor_z = anchor_key.y * VoxelChunk::SIZE_Z + local_z;
-				const int anchor_y = CLAMP(generator->get_surface_y_at(anchor_x, anchor_z) + 1, 1, VoxelChunk::SIZE_Y - 1);
-				const Vector3i object_pos(anchor_x, anchor_y, anchor_z);
-				if (_block_to_chunk(object_pos) != p_key) {
+				if (!p_rect.has_point(Vector2i(site.block_pos.x, site.block_pos.z))) {
 					continue;
 				}
-
-				const uint32_t id_hi = _hash_structure_anchor(si, anchor_key, 100);
-				const uint32_t id_lo = _hash_structure_anchor(si, anchor_key, 101);
-				int64_t object_id = -((int64_t)((((uint64_t)id_hi) << 32) | id_lo) & 0x7FFFFFFFFFFFFFFFLL);
-				if (object_id == 0) {
-					object_id = -1;
-				}
-				Dictionary state = entry.world_object_state;
-				state["structure_name"] = entry.name;
-				state["generated"] = true;
-
-				WorldObjectEntry object;
-				object.id = object_id;
-				object.type = entry.world_object_type;
-				object.block_pos = object_pos;
-				object.rotation_y = (float)_select_structure_rotation(entry, si, anchor_key);
-				object.state = state;
-				object.blocking = entry.world_object_blocking;
-				_add_world_object_internal(object, false, true);
+				Dictionary d;
+				d["id"] = _structure_object_id(si, Vector2i(cx, cz));
+				d["structure_id"] = si;
+				d["structure_name"] = entry.name;
+				d["world_object_type"] = String(entry.world_object_type);
+				d["block_pos"] = site.block_pos;
+				d["rotation_y"] = (float)_select_structure_rotation(entry, si, Vector2i(cx, cz));
+				d["cell"] = Vector2i(cx, cz);
+				result.push_back(d);
 			}
 		}
 	}
+	return result;
+}
+
+void VoxelWorld::set_structure_state_provider(const Callable &p_provider) {
+	structure_state_provider = p_provider;
+}
+
+Vector3i VoxelWorld::get_terrain_sample(int p_world_x, int p_world_z) const {
+	if (generator == nullptr) {
+		return Vector3i(sea_level, -1, 0);
+	}
+	return Vector3i(
+			generator->get_surface_y_at(p_world_x, p_world_z),
+			generator->get_biome_index_at(p_world_x, p_world_z),
+			generator->is_water_influenced_at(p_world_x, p_world_z) ? 1 : 0);
 }
 
 // --- Block interaction API ---
@@ -2880,7 +3339,15 @@ String VoxelWorld::get_block_name_at(const Vector3 &p_world_pos) const {
 }
 
 int VoxelWorld::get_surface_y_at(int p_world_x, int p_world_z) const {
-	return generator != nullptr ? generator->get_surface_y_at(p_world_x, p_world_z) : sea_level;
+	if (generator == nullptr) {
+		return sea_level;
+	}
+	const int natural = generator->get_surface_y_at(p_world_x, p_world_z);
+	if (!crater.enabled) {
+		return natural;
+	}
+	const int target = _crater_target_y(_resolve_landing_site(), p_world_x, p_world_z, natural);
+	return target == INT32_MIN ? natural : CLAMP(target, 2, VoxelChunk::SIZE_Y - 8);
 }
 
 int VoxelWorld::get_biome_at(const Vector3 &p_world_pos) const {

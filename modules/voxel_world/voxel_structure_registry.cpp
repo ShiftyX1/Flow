@@ -41,6 +41,41 @@ static PackedInt32Array _packed_ints_from_variant(const Variant &p_value) {
 	return out;
 }
 
+VoxelStructureRegistry::Placement VoxelStructureRegistry::_placement_from_dictionary(const Dictionary &p_placement) {
+	Placement placement;
+	const String mode = String(p_placement.get("mode", "chance"));
+	placement.lattice = mode == "lattice";
+	placement.cell_size = MAX((int)p_placement.get("cell_size", placement.cell_size), 16);
+	placement.jitter_min = CLAMP((float)p_placement.get("jitter_min", placement.jitter_min), 0.0f, 1.0f);
+	placement.jitter_max = CLAMP((float)p_placement.get("jitter_max", placement.jitter_max), placement.jitter_min, 1.0f);
+	placement.occupancy = CLAMP((float)p_placement.get("occupancy", placement.occupancy), 0.0f, 1.0f);
+	placement.min_distance_from_origin = MAX((int)p_placement.get("min_distance_from_origin", 0), 0);
+	placement.min_distance_to = MAX((int)p_placement.get("min_distance_to", 0), 0);
+	placement.min_distance_to_names = _packed_strings_from_variant(p_placement.get("min_distance_to_names", Variant()));
+	placement.max_attempts = CLAMP((int)p_placement.get("max_attempts", placement.max_attempts), 1, 64);
+	placement.max_slope = MAX((int)p_placement.get("max_slope", placement.max_slope), 0);
+	placement.min_height_above_sea = (int)p_placement.get("min_height_above_sea", placement.min_height_above_sea);
+	placement.footprint_radius = MAX((int)p_placement.get("footprint_radius", placement.footprint_radius), 0);
+	return placement;
+}
+
+Dictionary VoxelStructureRegistry::_placement_to_dictionary(const Placement &p_placement) {
+	Dictionary d;
+	d["mode"] = p_placement.lattice ? "lattice" : "chance";
+	d["cell_size"] = p_placement.cell_size;
+	d["jitter_min"] = p_placement.jitter_min;
+	d["jitter_max"] = p_placement.jitter_max;
+	d["occupancy"] = p_placement.occupancy;
+	d["min_distance_from_origin"] = p_placement.min_distance_from_origin;
+	d["min_distance_to"] = p_placement.min_distance_to;
+	d["min_distance_to_names"] = p_placement.min_distance_to_names;
+	d["max_attempts"] = p_placement.max_attempts;
+	d["max_slope"] = p_placement.max_slope;
+	d["min_height_above_sea"] = p_placement.min_height_above_sea;
+	d["footprint_radius"] = p_placement.footprint_radius;
+	return d;
+}
+
 VoxelStructureRegistry::StructureEntry VoxelStructureRegistry::_entry_from_properties(const String &p_name, const Dictionary &p_properties) {
 	StructureEntry entry;
 	entry.name = p_name;
@@ -51,6 +86,9 @@ VoxelStructureRegistry::StructureEntry VoxelStructureRegistry::_entry_from_prope
 	}
 	if (entry.voxel_data.is_valid()) {
 		entry.size = entry.voxel_data->get_size();
+	}
+	if (p_properties.has("placement")) {
+		entry.placement = _placement_from_dictionary(p_properties["placement"]);
 	}
 	if (p_properties.has("rarity")) {
 		entry.rarity = MAX((int)p_properties["rarity"], 0);
@@ -89,6 +127,7 @@ Dictionary VoxelStructureRegistry::_entry_to_dictionary(const StructureEntry &p_
 	Dictionary d;
 	d["name"] = p_entry.name;
 	d["voxel_data"] = p_entry.voxel_data;
+	d["placement"] = _placement_to_dictionary(p_entry.placement);
 	d["rarity"] = p_entry.rarity;
 	d["biome_tags"] = p_entry.biome_tags;
 	d["layer_tags"] = p_entry.layer_tags;
@@ -126,6 +165,9 @@ void VoxelStructureRegistry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_structure_world_object_type", "id"), &VoxelStructureRegistry::get_structure_world_object_type);
 	ClassDB::bind_method(D_METHOD("set_structure_world_object_state", "id", "state"), &VoxelStructureRegistry::set_structure_world_object_state);
 	ClassDB::bind_method(D_METHOD("get_structure_world_object_state", "id"), &VoxelStructureRegistry::get_structure_world_object_state);
+	ClassDB::bind_method(D_METHOD("set_structure_placement", "id", "placement"), &VoxelStructureRegistry::set_structure_placement);
+	ClassDB::bind_method(D_METHOD("get_structure_placement", "id"), &VoxelStructureRegistry::get_structure_placement);
+	ClassDB::bind_method(D_METHOD("find_structure", "name"), &VoxelStructureRegistry::find_structure);
 	ClassDB::bind_method(D_METHOD("set_structure_world_object_blocking", "id", "blocking"), &VoxelStructureRegistry::set_structure_world_object_blocking);
 	ClassDB::bind_method(D_METHOD("get_structure_world_object_blocking", "id"), &VoxelStructureRegistry::get_structure_world_object_blocking);
 }
@@ -367,6 +409,26 @@ void VoxelStructureRegistry::set_structure_world_object_state(int p_id, const Di
 Dictionary VoxelStructureRegistry::get_structure_world_object_state(int p_id) const {
 	ERR_FAIL_INDEX_V(p_id, structures.size(), Dictionary());
 	return structures[p_id].world_object_state;
+}
+
+void VoxelStructureRegistry::set_structure_placement(int p_id, const Dictionary &p_placement) {
+	ERR_FAIL_INDEX(p_id, structures.size());
+	structures.write[p_id].placement = _placement_from_dictionary(p_placement);
+	emit_changed();
+}
+
+Dictionary VoxelStructureRegistry::get_structure_placement(int p_id) const {
+	ERR_FAIL_INDEX_V(p_id, structures.size(), Dictionary());
+	return _placement_to_dictionary(structures[p_id].placement);
+}
+
+int VoxelStructureRegistry::find_structure(const String &p_name) const {
+	for (int i = 0; i < structures.size(); i++) {
+		if (structures[i].name == p_name) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 void VoxelStructureRegistry::set_structure_world_object_blocking(int p_id, bool p_blocking) {

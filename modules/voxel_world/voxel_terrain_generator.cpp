@@ -186,6 +186,13 @@ int VoxelTerrainGenerator::get_surface_y_at(int p_world_x, int p_world_z) const 
 	return _find_surface_y(p_world_x, p_world_z, params);
 }
 
+bool VoxelTerrainGenerator::is_water_influenced_at(int p_world_x, int p_world_z) const {
+	return _get_river_factor(p_world_x, p_world_z) > 0.0f ||
+			_get_river_bank_factor(p_world_x, p_world_z) > 0.0f ||
+			_get_lake_factor(p_world_x, p_world_z) > 0.0f ||
+			_get_lake_bank_factor(p_world_x, p_world_z) > 0.0f;
+}
+
 // ===========================================================================
 // Biome data access helpers
 // ===========================================================================

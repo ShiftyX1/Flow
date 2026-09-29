@@ -40,9 +40,26 @@ GodotApplication *GodotApp = nil;
 - (void)forceUnbundledWindowActivationHackStep1;
 - (void)forceUnbundledWindowActivationHackStep2;
 - (void)forceUnbundledWindowActivationHackStep3;
+#ifdef MODULE_GODOT_CEF_ENABLED
+- (void)godotSendEvent:(NSEvent *)event;
+#endif
 @end
 
-@implementation GodotApplication
+@implementation GodotApplication {
+#ifdef MODULE_GODOT_CEF_ENABLED
+	BOOL handlingSendEvent;
+#endif
+}
+
+#ifdef MODULE_GODOT_CEF_ENABLED
+- (BOOL)isHandlingSendEvent {
+	return handlingSendEvent;
+}
+
+- (void)setHandlingSendEvent:(BOOL)value {
+	handlingSendEvent = value;
+}
+#endif
 
 - (GodotApplication *)init {
 	self = [super init];
@@ -140,6 +157,15 @@ GodotApplication *GodotApp = nil;
 }
 
 - (void)sendEvent:(NSEvent *)event {
+#ifdef MODULE_GODOT_CEF_ENABLED
+	const BOOL wasHandlingSendEvent = handlingSendEvent;
+	handlingSendEvent = YES;
+	[self godotSendEvent:event];
+	handlingSendEvent = wasHandlingSendEvent;
+}
+
+- (void)godotSendEvent:(NSEvent *)event {
+#endif
 	if ([event type] == NSEventTypeSystemDefined && [event subtype] == 8) {
 		int keyCode = (([event data1] & 0xFFFF0000) >> 16);
 		int keyFlags = ([event data1] & 0x0000FFFF);

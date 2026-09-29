@@ -4,10 +4,324 @@
 
 #include "cef_texture.h"
 
+#include "godot_cef_browser.h"
 #include "godot_cef_data.h"
-#include "godot_cef_settings.h"
+#include "godot_cef_input.h"
+#include "godot_cef_runtime.h"
 
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/os/main_loop.h"
+#include "scene/main/viewport.h"
+#include "scene/main/window.h"
+#include "scene/resources/canvas_item_material.h"
+#include "servers/display/display_server.h"
+#include "servers/rendering/rendering_server.h"
+
+static Ref<CanvasItemMaterial> *shared_premultiplied_material = nullptr;
+
+GodotCefBrowserHost *CefTexture::_get_host() const {
+	return browser_texture.is_valid() ? browser_texture->_get_host() : nullptr;
+}
+
+void CefTexture::_update_scale() {
+	float new_pixel_scale = 1.0f;
+	if (is_inside_tree()) {
+		const Transform2D xform = get_viewport()->get_stretch_transform() * get_global_transform_with_canvas();
+		new_pixel_scale = CLAMP(Math::abs(xform.get_scale().x), 0.1f, 8.0f);
+	}
+	float new_device_scale = 1.0f;
+	DisplayServer *ds = DisplayServer::get_singleton();
+	Window *window = is_inside_tree() ? get_window() : nullptr;
+	if (ds && window) {
+		const int screen = window->get_current_screen();
+#ifdef WINDOWS_ENABLED
+		new_device_scale = ds->screen_get_dpi(screen) / 96.0f;
+#else
+		new_device_scale = ds->screen_get_scale(screen);
+#endif
+		new_device_scale = CLAMP(new_device_scale, 0.5f, 8.0f);
+	}
+	pixel_scale = new_pixel_scale;
+	device_scale = new_device_scale;
+}
+
+void CefTexture::_update_view() {
+	if (browser_texture.is_null()) {
+		return;
+	}
+	_update_scale();
+	const Size2 size = get_size();
+	if (size.x < 1.0f || size.y < 1.0f) {
+		return;
+	}
+	const Vector2i physical = Vector2i(MAX(1, int(Math::round(size.x * pixel_scale))), MAX(1, int(Math::round(size.y * pixel_scale))));
+	browser_texture->_set_view(physical, device_scale);
+	browser_texture->_start();
+}
+
+void CefTexture::_update_cursor_and_tooltip() {
+	GodotCefBrowserHost *host = _get_host();
+	if (!host) {
+		return;
+	}
+	const CursorShape shape = CursorShape(host->get_cursor());
+	if (shape != get_default_cursor_shape() && is_visible_in_tree() && get_global_rect().has_point(get_global_mouse_position())) {
+		DisplayServer::get_singleton()->cursor_set_shape(DisplayServerEnums::CursorShape(shape));
+	}
+	last_tooltip = host->get_tooltip();
+}
+
+void CefTexture::_set_ime_active(bool p_active) {
+	if (ime_active == p_active) {
+		return;
+	}
+	ime_active = p_active;
+	Window *window = is_inside_tree() ? get_window() : nullptr;
+	DisplayServer *ds = DisplayServer::get_singleton();
+	if (!window || !ds || !ds->has_feature(DisplayServerEnums::FEATURE_IME)) {
+		return;
+	}
+	const DisplayServerEnums::WindowID wid = window->get_window_id();
+	if (wid == DisplayServerEnums::INVALID_WINDOW_ID) {
+		return;
+	}
+	if (!p_active) {
+		if (ime_composing) {
+			GodotCefBrowserHost *host = _get_host();
+			if (host && host->has_browser()) {
+				GodotCefInput::ime_cancel_composition(host->get_cef_host());
+			}
+			ime_composing = false;
+		}
+		ds->window_set_ime_position(Point2(), wid);
+	}
+	ds->window_set_ime_active(p_active, wid);
+}
+
+void CefTexture::_update_ime() {
+	GodotCefBrowserHost *host = _get_host();
+	const bool want = host && host->is_ime_requested() && has_focus() && is_visible_in_tree();
+	_set_ime_active(want);
+	if (!ime_active) {
+		return;
+	}
+	if (!ime_position_overridden) {
+		const Rect2i caret = host->get_ime_caret_rect();
+		const float to_local = device_scale / MAX(pixel_scale, 0.01f);
+		ime_position = Vector2i(Math::round(caret.position.x * to_local), Math::round((caret.position.y + caret.size.y) * to_local));
+	}
+	Window *window = get_window();
+	const DisplayServerEnums::WindowID wid = window->get_window_id();
+	if (wid == DisplayServerEnums::INVALID_WINDOW_ID) {
+		return;
+	}
+	Point2 pos = Point2(ime_position) + get_global_position();
+	if (window->get_embedder()) {
+		pos += get_viewport()->get_popup_base_transform().get_origin();
+	}
+	pos = window->get_screen_transform().xform(pos);
+	DisplayServer::get_singleton()->window_set_ime_position(pos, wid);
+}
+
+void CefTexture::_apply_premultiplied_material() {
+	if (get_material().is_valid() || get_use_parent_material()) {
+		return;
+	}
+	// CEF renders premultiplied alpha. Assigned through RenderingServer so the material
+	// property stays empty and is not saved with the scene.
+	if (!shared_premultiplied_material) {
+		shared_premultiplied_material = memnew(Ref<CanvasItemMaterial>);
+		shared_premultiplied_material->instantiate();
+		(*shared_premultiplied_material)->set_blend_mode(CanvasItemMaterial::BLEND_MODE_PREMULT_ALPHA);
+	}
+	RenderingServer::get_singleton()->canvas_item_set_material(get_canvas_item(), (*shared_premultiplied_material)->get_rid());
+}
+
+void CefTexture::cleanup_shared_resources() {
+	if (shared_premultiplied_material) {
+		memdelete(shared_premultiplied_material);
+		shared_premultiplied_material = nullptr;
+	}
+}
+
+Vector2 CefTexture::_local_to_texture(const Vector2 &p_local) const {
+	return p_local * pixel_scale;
+}
+
+void CefTexture::_on_files_dropped(const PackedStringArray &p_files) {
+	if (!is_visible_in_tree() || browser_texture.is_null()) {
+		return;
+	}
+	const Vector2 local = get_local_mouse_position();
+	if (!Rect2(Point2(), get_size()).has_point(local)) {
+		return;
+	}
+	Array files;
+	for (const String &file : p_files) {
+		files.push_back(file);
+	}
+	const Vector2 pos = _local_to_texture(local);
+	browser_texture->drag_enter(files, pos, DragOperation::EVERY);
+	browser_texture->drag_over(pos, DragOperation::EVERY);
+	browser_texture->drag_drop(pos);
+}
+
+void CefTexture::_finish_browser_drag(const Vector2 &p_local_position) {
+	GodotCefBrowserHost *host = _get_host();
+	if (!host) {
+		return;
+	}
+	const Vector2 pos = _local_to_texture(p_local_position);
+	if (Rect2(Point2(), get_size()).has_point(p_local_position)) {
+		browser_texture->drag_drop(pos);
+		browser_texture->drag_source_ended(pos, host->get_drag_operation());
+	} else {
+		browser_texture->drag_leave();
+		browser_texture->drag_source_ended(pos, DragOperation::NONE);
+	}
+	browser_texture->drag_source_system_ended();
+}
+
+void CefTexture::gui_input(const Ref<InputEvent> &p_event) {
+	ERR_FAIL_COND(p_event.is_null());
+	if (browser_texture.is_null()) {
+		return;
+	}
+
+	Ref<InputEventMouseButton> mb = p_event;
+	if (mb.is_valid()) {
+		if (mb->is_pressed() && get_focus_mode_with_override() != FOCUS_NONE) {
+			grab_focus();
+		}
+		if (browser_texture->is_dragging_from_browser() && mb->get_button_index() == MouseButton::LEFT && !mb->is_pressed()) {
+			_finish_browser_drag(mb->get_position());
+		} else {
+			browser_texture->forward_mouse_button_event(mb, pixel_scale, device_scale);
+		}
+		accept_event();
+		return;
+	}
+
+	Ref<InputEventMouseMotion> mm = p_event;
+	if (mm.is_valid()) {
+		if (browser_texture->is_dragging_from_browser()) {
+			browser_texture->drag_over(_local_to_texture(mm->get_position()), DragOperation::EVERY);
+		} else {
+			browser_texture->forward_mouse_motion_event(mm, pixel_scale, device_scale);
+		}
+		accept_event();
+		return;
+	}
+
+	Ref<InputEventKey> key = p_event;
+	if (key.is_valid()) {
+		if (key->get_keycode() == Key::NONE && key->get_unicode() != 0) {
+			ime_composing = false;
+		}
+		browser_texture->forward_key_event(key, ime_active);
+		accept_event();
+		return;
+	}
+
+	if (Object::cast_to<InputEventPanGesture>(p_event.ptr()) || Object::cast_to<InputEventMagnifyGesture>(p_event.ptr()) ||
+			Object::cast_to<InputEventScreenTouch>(p_event.ptr()) || Object::cast_to<InputEventScreenDrag>(p_event.ptr())) {
+		browser_texture->forward_input_event(p_event, pixel_scale, device_scale, ime_active);
+		accept_event();
+	}
+}
+
+String CefTexture::get_tooltip(const Point2 &p_pos) const {
+	if (!last_tooltip.is_empty()) {
+		return last_tooltip;
+	}
+	return TextureRect::get_tooltip(p_pos);
+}
+
+Control::CursorShape CefTexture::get_cursor_shape(const Point2 &p_pos) const {
+	GodotCefBrowserHost *host = _get_host();
+	if (host && host->has_browser()) {
+		return CursorShape(host->get_cursor());
+	}
+	return TextureRect::get_cursor_shape(p_pos);
+}
+
+void CefTexture::_notification(int p_what) {
+	switch (p_what) {
+		case NOTIFICATION_ENTER_TREE: {
+			GodotCefRuntime::ensure_frame_hook();
+			set_process_internal(true);
+			Window *window = get_window();
+			if (window && !window->is_connected(SNAME("files_dropped"), callable_mp(this, &CefTexture::_on_files_dropped))) {
+				window->connect(SNAME("files_dropped"), callable_mp(this, &CefTexture::_on_files_dropped));
+			}
+			_update_view();
+		} break;
+		case NOTIFICATION_READY: {
+			_apply_premultiplied_material();
+		} break;
+		case NOTIFICATION_EXIT_TREE: {
+			_set_ime_active(false);
+			Window *window = get_window();
+			if (window && window->is_connected(SNAME("files_dropped"), callable_mp(this, &CefTexture::_on_files_dropped))) {
+				window->disconnect(SNAME("files_dropped"), callable_mp(this, &CefTexture::_on_files_dropped));
+			}
+		} break;
+		case NOTIFICATION_INTERNAL_PROCESS: {
+			_update_view();
+			_update_cursor_and_tooltip();
+			_update_ime();
+		} break;
+		case NOTIFICATION_RESIZED: {
+			_update_view();
+		} break;
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+			GodotCefBrowserHost *host = _get_host();
+			if (host && host->has_browser()) {
+				host->get_cef_host()->WasHidden(!is_visible_in_tree());
+			}
+			if (!is_visible_in_tree()) {
+				_set_ime_active(false);
+			}
+		} break;
+		case NOTIFICATION_FOCUS_ENTER: {
+			browser_texture->set_focused(true);
+		} break;
+		case NOTIFICATION_FOCUS_EXIT: {
+			browser_texture->set_focused(false);
+			_set_ime_active(false);
+		} break;
+		case NOTIFICATION_MOUSE_EXIT: {
+			if (!browser_texture->is_dragging_from_browser()) {
+				browser_texture->forward_mouse_exit(get_local_mouse_position(), pixel_scale, device_scale);
+			}
+		} break;
+		case MainLoop::NOTIFICATION_OS_IME_UPDATE: {
+			GodotCefBrowserHost *host = _get_host();
+			if (!ime_active || !host || !host->has_browser()) {
+				break;
+			}
+			DisplayServer *ds = DisplayServer::get_singleton();
+			const String text = ds->ime_get_text();
+			if (!text.is_empty()) {
+				GodotCefInput::ime_set_composition(host->get_cef_host(), text, ds->ime_get_selection());
+				ime_composing = true;
+			} else if (ime_composing) {
+				GodotCefInput::ime_cancel_composition(host->get_cef_host());
+				ime_composing = false;
+			}
+		} break;
+	}
+}
+
+void CefTexture::_validate_property(PropertyInfo &p_property) const {
+	// The browser texture is runtime state and must not be saved with the scene.
+	if (p_property.name == "texture") {
+		p_property.usage = PROPERTY_USAGE_NONE;
+	}
+}
+
+/* Forwarded API */
 
 void CefTexture::set_url(const String &p_url) {
 	browser_texture->set_url(p_url);
@@ -17,12 +331,24 @@ String CefTexture::get_url() const {
 	return browser_texture->get_url();
 }
 
+String CefTexture::get_current_url() const {
+	return browser_texture->get_current_url();
+}
+
+String CefTexture::get_title() const {
+	return browser_texture->get_title();
+}
+
 void CefTexture::set_enable_accelerated_osr(bool p_enable) {
 	browser_texture->set_enable_accelerated_osr(p_enable);
 }
 
 bool CefTexture::get_enable_accelerated_osr() const {
 	return browser_texture->get_enable_accelerated_osr();
+}
+
+bool CefTexture::is_accelerated() const {
+	return browser_texture->is_accelerated();
 }
 
 void CefTexture::set_background_color(const Color &p_color) {
@@ -59,10 +385,15 @@ String CefTexture::get_preload_script_path() const {
 
 void CefTexture::set_ime_position(const Vector2i &p_position) {
 	ime_position = p_position;
+	ime_position_overridden = true;
 }
 
 Vector2i CefTexture::get_ime_position() const {
 	return ime_position;
+}
+
+bool CefTexture::is_browser_ready() const {
+	return browser_texture->is_browser_ready();
 }
 
 void CefTexture::eval(const String &p_code) {
@@ -145,120 +476,108 @@ void CefTexture::stop_finding() {
 	browser_texture->stop_finding();
 }
 
+void CefTexture::shutdown() {
+	_set_ime_active(false);
+	browser_texture->shutdown();
+}
+
 Ref<AudioStreamGenerator> CefTexture::create_audio_stream() const {
-	Ref<AudioStreamGenerator> stream;
-	stream.instantiate();
-	stream->set_mix_rate(48000.0);
-	stream->set_buffer_length(0.1);
-	return stream;
+	return browser_texture->create_audio_stream();
 }
 
 int CefTexture::push_audio_to_playback(const Ref<AudioStreamGeneratorPlayback> &p_playback) {
-	(void)p_playback;
-	return 0;
+	return browser_texture->push_audio_to_playback(p_playback);
 }
 
 bool CefTexture::has_audio_data() const {
-	return false;
+	return browser_texture->has_audio_data();
 }
 
 int CefTexture::get_audio_buffer_size() const {
-	return 0;
+	return browser_texture->get_audio_buffer_size();
 }
 
 bool CefTexture::is_audio_capture_enabled() const {
-	return GodotCefSettings::is_audio_capture_enabled();
+	return browser_texture->is_audio_capture_enabled();
 }
 
 void CefTexture::drag_enter(const Array &p_file_paths, const Vector2 &p_position, int p_allowed_ops) {
-	(void)p_file_paths;
-	(void)p_position;
-	(void)p_allowed_ops;
-	drag_over_browser = true;
+	browser_texture->drag_enter(p_file_paths, _local_to_texture(p_position), p_allowed_ops);
 }
 
 void CefTexture::drag_over(const Vector2 &p_position, int p_allowed_ops) {
-	(void)p_position;
-	(void)p_allowed_ops;
+	browser_texture->drag_over(_local_to_texture(p_position), p_allowed_ops);
 }
 
 void CefTexture::drag_leave() {
-	drag_over_browser = false;
+	browser_texture->drag_leave();
 }
 
 void CefTexture::drag_drop(const Vector2 &p_position) {
-	(void)p_position;
-	drag_over_browser = false;
+	browser_texture->drag_drop(_local_to_texture(p_position));
 }
 
 void CefTexture::drag_source_ended(const Vector2 &p_position, int p_operation) {
-	(void)p_position;
-	(void)p_operation;
-	dragging_from_browser = false;
+	browser_texture->drag_source_ended(_local_to_texture(p_position), p_operation);
 }
 
 void CefTexture::drag_source_system_ended() {
-	dragging_from_browser = false;
+	browser_texture->drag_source_system_ended();
 }
 
 bool CefTexture::is_dragging_from_browser() const {
-	return dragging_from_browser;
+	return browser_texture->is_dragging_from_browser();
 }
 
 bool CefTexture::is_drag_over() const {
-	return drag_over_browser;
+	return browser_texture->is_drag_over();
 }
 
 bool CefTexture::grant_permission(int64_t p_request_id) const {
-	(void)p_request_id;
-	return false;
+	return browser_texture->grant_permission(p_request_id);
 }
 
 bool CefTexture::deny_permission(int64_t p_request_id) const {
-	(void)p_request_id;
-	return false;
+	return browser_texture->deny_permission(p_request_id);
+}
+
+bool CefTexture::respond_js_dialog(int64_t p_dialog_id, bool p_success, const String &p_user_input) const {
+	return browser_texture->respond_js_dialog(p_dialog_id, p_success, p_user_input);
 }
 
 bool CefTexture::get_all_cookies() const {
-	return false;
+	return browser_texture->get_all_cookies();
 }
 
 bool CefTexture::get_cookies(const String &p_url, bool p_include_http_only) const {
-	(void)p_url;
-	(void)p_include_http_only;
-	return false;
+	return browser_texture->get_cookies(p_url, p_include_http_only);
 }
 
 bool CefTexture::set_cookie(const String &p_url, const String &p_name, const String &p_value, const String &p_domain, const String &p_path, bool p_secure, bool p_httponly) const {
-	(void)p_url;
-	(void)p_name;
-	(void)p_value;
-	(void)p_domain;
-	(void)p_path;
-	(void)p_secure;
-	(void)p_httponly;
-	return false;
+	return browser_texture->set_cookie(p_url, p_name, p_value, p_domain, p_path, p_secure, p_httponly);
 }
 
 bool CefTexture::delete_cookies(const String &p_url, const String &p_cookie_name) const {
-	(void)p_url;
-	(void)p_cookie_name;
-	return false;
+	return browser_texture->delete_cookies(p_url, p_cookie_name);
 }
 
 bool CefTexture::clear_cookies() const {
-	return delete_cookies(String(), String());
+	return browser_texture->clear_cookies();
 }
 
 bool CefTexture::flush_cookies() const {
-	return false;
+	return browser_texture->flush_cookies();
 }
 
 void CefTexture::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_browser_texture"), &CefTexture::get_browser_texture);
 	ClassDB::bind_method(D_METHOD("set_url", "url"), &CefTexture::set_url);
 	ClassDB::bind_method(D_METHOD("get_url"), &CefTexture::get_url);
+	ClassDB::bind_method(D_METHOD("get_current_url"), &CefTexture::get_current_url);
+	ClassDB::bind_method(D_METHOD("get_title"), &CefTexture::get_title);
 	ClassDB::bind_method(D_METHOD("set_enable_accelerated_osr", "enable"), &CefTexture::set_enable_accelerated_osr);
 	ClassDB::bind_method(D_METHOD("get_enable_accelerated_osr"), &CefTexture::get_enable_accelerated_osr);
+	ClassDB::bind_method(D_METHOD("is_accelerated"), &CefTexture::is_accelerated);
 	ClassDB::bind_method(D_METHOD("set_background_color", "color"), &CefTexture::set_background_color);
 	ClassDB::bind_method(D_METHOD("get_background_color"), &CefTexture::get_background_color);
 	ClassDB::bind_method(D_METHOD("set_popup_policy", "policy"), &CefTexture::set_popup_policy);
@@ -269,6 +588,7 @@ void CefTexture::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_preload_script_path"), &CefTexture::get_preload_script_path);
 	ClassDB::bind_method(D_METHOD("set_ime_position", "position"), &CefTexture::set_ime_position);
 	ClassDB::bind_method(D_METHOD("get_ime_position"), &CefTexture::get_ime_position);
+	ClassDB::bind_method(D_METHOD("is_browser_ready"), &CefTexture::is_browser_ready);
 	ClassDB::bind_method(D_METHOD("eval", "code"), &CefTexture::eval);
 	ClassDB::bind_method(D_METHOD("go_back"), &CefTexture::go_back);
 	ClassDB::bind_method(D_METHOD("go_forward"), &CefTexture::go_forward);
@@ -285,10 +605,11 @@ void CefTexture::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("send_ipc_message", "message"), &CefTexture::send_ipc_message);
 	ClassDB::bind_method(D_METHOD("send_ipc_binary_message", "data"), &CefTexture::send_ipc_binary_message);
 	ClassDB::bind_method(D_METHOD("send_ipc_data", "data"), &CefTexture::send_ipc_data);
-	ClassDB::bind_method(D_METHOD("find_text", "query", "forward", "match_case"), &CefTexture::find_text);
+	ClassDB::bind_method(D_METHOD("find_text", "query", "forward", "match_case"), &CefTexture::find_text, DEFVAL(true), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("find_next"), &CefTexture::find_next);
 	ClassDB::bind_method(D_METHOD("find_previous"), &CefTexture::find_previous);
 	ClassDB::bind_method(D_METHOD("stop_finding"), &CefTexture::stop_finding);
+	ClassDB::bind_method(D_METHOD("shutdown"), &CefTexture::shutdown);
 	ClassDB::bind_method(D_METHOD("create_audio_stream"), &CefTexture::create_audio_stream);
 	ClassDB::bind_method(D_METHOD("push_audio_to_playback", "playback"), &CefTexture::push_audio_to_playback);
 	ClassDB::bind_method(D_METHOD("has_audio_data"), &CefTexture::has_audio_data);
@@ -304,47 +625,40 @@ void CefTexture::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_drag_over"), &CefTexture::is_drag_over);
 	ClassDB::bind_method(D_METHOD("grant_permission", "request_id"), &CefTexture::grant_permission);
 	ClassDB::bind_method(D_METHOD("deny_permission", "request_id"), &CefTexture::deny_permission);
+	ClassDB::bind_method(D_METHOD("respond_js_dialog", "dialog_id", "success", "user_input"), &CefTexture::respond_js_dialog, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("get_all_cookies"), &CefTexture::get_all_cookies);
-	ClassDB::bind_method(D_METHOD("get_cookies", "url", "include_http_only"), &CefTexture::get_cookies);
-	ClassDB::bind_method(D_METHOD("set_cookie", "url", "name", "value", "domain", "path", "secure", "httponly"), &CefTexture::set_cookie);
-	ClassDB::bind_method(D_METHOD("delete_cookies", "url", "cookie_name"), &CefTexture::delete_cookies);
+	ClassDB::bind_method(D_METHOD("get_cookies", "url", "include_http_only"), &CefTexture::get_cookies, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("set_cookie", "url", "name", "value", "domain", "path", "secure", "httponly"), &CefTexture::set_cookie, DEFVAL(String()), DEFVAL("/"), DEFVAL(false), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("delete_cookies", "url", "cookie_name"), &CefTexture::delete_cookies, DEFVAL(String()), DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("clear_cookies"), &CefTexture::clear_cookies);
 	ClassDB::bind_method(D_METHOD("flush_cookies"), &CefTexture::flush_cookies);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "url"), "set_url", "get_url");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enable_accelerated_osr"), "set_enable_accelerated_osr", "get_enable_accelerated_osr");
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "background_color"), "set_background_color", "get_background_color");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "popup_policy", PROPERTY_HINT_ENUM, "Block:0,Redirect:1,SignalOnly:2"), "set_popup_policy", "get_popup_policy");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "popup_policy", PROPERTY_HINT_ENUM, "Block,Redirect,Signal Only"), "set_popup_policy", "get_popup_policy");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "preload_script", PROPERTY_HINT_MULTILINE_TEXT), "set_preload_script", "get_preload_script");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "preload_script_path", PROPERTY_HINT_FILE), "set_preload_script_path", "get_preload_script_path");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "ime_position"), "set_ime_position", "get_ime_position");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "preload_script_path", PROPERTY_HINT_FILE, "*.js"), "set_preload_script_path", "get_preload_script_path");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "ime_position", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_ime_position", "get_ime_position");
 
-	ADD_SIGNAL(MethodInfo("ipc_message", PropertyInfo(Variant::STRING, "message")));
-	ADD_SIGNAL(MethodInfo("ipc_binary_message", PropertyInfo(Variant::PACKED_BYTE_ARRAY, "data")));
-	ADD_SIGNAL(MethodInfo("ipc_data_message", PropertyInfo(Variant::NIL, "data")));
-	ADD_SIGNAL(MethodInfo("debug_ipc_message", PropertyInfo(Variant::NIL, "event")));
-	ADD_SIGNAL(MethodInfo("url_changed", PropertyInfo(Variant::STRING, "url")));
-	ADD_SIGNAL(MethodInfo("title_changed", PropertyInfo(Variant::STRING, "title")));
-	ADD_SIGNAL(MethodInfo("load_started", PropertyInfo(Variant::STRING, "url")));
-	ADD_SIGNAL(MethodInfo("load_finished", PropertyInfo(Variant::STRING, "url"), PropertyInfo(Variant::INT, "http_status_code")));
-	ADD_SIGNAL(MethodInfo("load_error", PropertyInfo(Variant::STRING, "url"), PropertyInfo(Variant::INT, "error_code"), PropertyInfo(Variant::STRING, "error_text")));
-	ADD_SIGNAL(MethodInfo("console_message", PropertyInfo(Variant::INT, "level"), PropertyInfo(Variant::STRING, "message"), PropertyInfo(Variant::STRING, "source"), PropertyInfo(Variant::INT, "line")));
-	ADD_SIGNAL(MethodInfo("drag_started", PropertyInfo(Variant::OBJECT, "drag_data", PROPERTY_HINT_RESOURCE_TYPE, "DragDataInfo"), PropertyInfo(Variant::VECTOR2, "position"), PropertyInfo(Variant::INT, "allowed_ops")));
-	ADD_SIGNAL(MethodInfo("drag_cursor_updated", PropertyInfo(Variant::INT, "operation")));
-	ADD_SIGNAL(MethodInfo("drag_entered", PropertyInfo(Variant::OBJECT, "drag_data", PROPERTY_HINT_RESOURCE_TYPE, "DragDataInfo"), PropertyInfo(Variant::INT, "mask")));
-	ADD_SIGNAL(MethodInfo("download_requested", PropertyInfo(Variant::OBJECT, "download_info", PROPERTY_HINT_RESOURCE_TYPE, "DownloadRequestInfo")));
-	ADD_SIGNAL(MethodInfo("download_updated", PropertyInfo(Variant::OBJECT, "download_info", PROPERTY_HINT_RESOURCE_TYPE, "DownloadUpdateInfo")));
-	ADD_SIGNAL(MethodInfo("render_process_terminated", PropertyInfo(Variant::INT, "status"), PropertyInfo(Variant::STRING, "error_message")));
-	ADD_SIGNAL(MethodInfo("popup_requested", PropertyInfo(Variant::STRING, "url"), PropertyInfo(Variant::INT, "disposition"), PropertyInfo(Variant::BOOL, "user_gesture")));
-	ADD_SIGNAL(MethodInfo("permission_requested", PropertyInfo(Variant::STRING, "permission_type"), PropertyInfo(Variant::STRING, "url"), PropertyInfo(Variant::INT, "request_id")));
-	ADD_SIGNAL(MethodInfo("find_result", PropertyInfo(Variant::INT, "count"), PropertyInfo(Variant::INT, "active_index"), PropertyInfo(Variant::BOOL, "final_update")));
-	ADD_SIGNAL(MethodInfo("cookies_received", PropertyInfo(Variant::ARRAY, "cookies")));
-	ADD_SIGNAL(MethodInfo("cookie_set", PropertyInfo(Variant::BOOL, "success")));
-	ADD_SIGNAL(MethodInfo("cookies_deleted", PropertyInfo(Variant::INT, "num_deleted")));
-	ADD_SIGNAL(MethodInfo("cookies_flushed"));
+	CefTexture2D::_bind_browser_signals(get_class_static());
 }
 
 CefTexture::CefTexture() {
 	browser_texture.instantiate();
+	browser_texture->_set_auto_start(false);
+	browser_texture->_set_signal_forward_target(get_instance_id());
 	set_texture(browser_texture);
+	set_expand_mode(EXPAND_IGNORE_SIZE);
+	set_stretch_mode(STRETCH_SCALE);
+	set_focus_mode(FOCUS_ALL);
+	set_mouse_filter(MOUSE_FILTER_STOP);
+}
+
+CefTexture::~CefTexture() {
+	if (browser_texture.is_valid()) {
+		browser_texture->_set_signal_forward_target(ObjectID());
+		// Close this control's browser right away instead of waiting for the last reference.
+		browser_texture->shutdown();
+	}
 }

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Godot CEF Menu</title>
+	<style>
+		:root { color-scheme: dark; }
+		html, body { margin: 0; height: 100%; font-family: ui-sans-serif, system-ui, sans-serif; background: #141820; color: #e8edf5; }
+		main { box-sizing: border-box; height: 100%; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+		h1 { margin: 0; font-size: 28px; }
+		p { margin: 0; color: #9aa6b8; }
+		.row { display: flex; flex-wrap: wrap; gap: 8px; }
+		button, input { font: inherit; border-radius: 8px; border: 1px solid #2c3648; background: #1d2533; color: inherit; padding: 10px 14px; }
+		button { cursor: pointer; }
+		button:hover { background: #2a3548; }
+		#log { flex: 1; overflow: auto; white-space: pre-wrap; background: #0e131b; border: 1px solid #2c3648; border-radius: 8px; padding: 12px; }
+	</style>
+</head>
+<body>
+	<main>
+		<h1>res:// HTML menu</h1>
+		<p>This page is served from the Godot virtual filesystem. Buttons send IPC messages to the engine.</p>
+		<div class="row">
+			<button id="play">Play</button>
+			<button id="settings">Settings</button>
+			<button id="quit">Quit</button>
+			<input id="payload" value="hello from Chromium" />
+			<button id="typed">Send typed data</button>
+		</div>
+		<div id="log">Waiting for IPC...</div>
+	</main>
+	<script>
+		const log = document.getElementById("log");
+		function append(line) {
+			log.textContent += "\n" + line;
+			log.scrollTop = log.scrollHeight;
+		}
+		function send(name) {
+			sendIpcMessage(name);
+			append("page → Godot: " + name);
+		}
+		document.getElementById("play").onclick = () => send("play");
+		document.getElementById("settings").onclick = () => send("settings");
+		document.getElementById("quit").onclick = () => send("quit");
+		document.getElementById("typed").onclick = () => {
+			const data = { action: "echo", text: document.getElementById("payload").value, n: 7 };
+			sendIpcData(data);
+			append("page → Godot (data): " + JSON.stringify(data));
+		};
+		window.onIpcMessage = (message) => append("Godot → page: " + message);
+		window.ipcDataMessage.addListener((data) => append("Godot → page (data): " + JSON.stringify(data)));
+	</script>
+</body>
+</html>

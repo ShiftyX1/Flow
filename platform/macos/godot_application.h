@@ -34,9 +34,28 @@
 #import <Foundation/Foundation.h>
 #import <IOKit/hidsystem/ev_keymap.h>
 
+#include "modules/modules_enabled.gen.h" // For godot_cef.
+
 @class GodotApplicationDelegate;
 
+#ifdef MODULE_GODOT_CEF_ENABLED
+// Same names and selectors as CrAppProtocol/CrAppControlProtocol/CefAppProtocol in
+// include/cef_application_mac.h; Chromium only messages NSApp through these selectors.
+@protocol CrAppProtocol
+- (BOOL)isHandlingSendEvent;
+@end
+
+@protocol CrAppControlProtocol <CrAppProtocol>
+- (void)setHandlingSendEvent:(BOOL)handlingSendEvent;
+@end
+
+@protocol CefAppProtocol <CrAppControlProtocol>
+@end
+
+@interface GodotApplication : NSApplication <CefAppProtocol>
+#else
 @interface GodotApplication : NSApplication
+#endif
 
 extern "C" GodotApplication *GodotApp;
 

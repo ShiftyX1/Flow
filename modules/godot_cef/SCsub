@@ -1,17 +1,118 @@
 #!/usr/bin/env python
 from misc.utility.scons_hints import *
 
+import os
+
+import godot_cef_builders
+
 Import("env")
 Import("env_modules")
 
-env_godot_cef = env_modules.Clone()
+sdk_path = env["GODOT_CEF_SDK_PATH"]
+is_macos = env["platform"] == "macos"
+is_windows = env["platform"] == "windows"
 
-runtime_path = env.get("godot_cef_runtime_path", "")
-if runtime_path:
-    runtime_path_define = '\\"{}\\"'.format(str(runtime_path).replace("\\", "/").replace('"', '\\"'))
-    env_godot_cef.Append(CPPDEFINES=[("GODOT_CEF_RUNTIME_PATH", runtime_path_define)])
-elif env.get("godot_cef_require_runtime", False):
-    print_error("godot_cef_require_runtime=yes requires godot_cef_runtime_path=<path>.")
-    Exit(255)
 
-env_godot_cef.add_source_files(env.modules_sources, "*.cpp")
+def use_cxx20(target_env):
+    flags = [f for f in target_env["CXXFLAGS"] if not str(f).startswith(("-std=", "/std:"))]
+    target_env["CXXFLAGS"] = flags
+    target_env.Prepend(CXXFLAGS=["/std:c++20" if target_env.msvc else "-std=gnu++20"])
+
+
+# CEF headers require C++20, the rest of the engine stays on C++17.
+env_cef = env_modules.Clone()
+use_cxx20(env_cef)
+env_cef.Prepend(CPPPATH=[sdk_path])
+env_cef.Append(CPPDEFINES=["__STDC_CONSTANT_MACROS", "__STDC_FORMAT_MACROS"])
+if is_windows:
+    env_cef.Append(CPPDEFINES=["WIN32_LEAN_AND_MEAN", "UNICODE", "_UNICODE"])
+
+# libcef_dll_wrapper, compiled from the SDK sources with the engine toolchain and flags.
+env_wrapper = env_cef.Clone()
+env_wrapper.Append(CPPDEFINES=["WRAPPING_CEF_SHARED"])
+env_wrapper.disable_warnings()
+if is_macos:
+    env_wrapper.Append(CCFLAGS=["-fno-objc-arc"])
+
+wrapper_obj = []
+for source in godot_cef_builders.get_wrapper_sources(sdk_path, env["platform"]):
+    rel = os.path.relpath(source, os.path.join(sdk_path, "libcef_dll"))
+    target = os.path.join("libcef_dll", os.path.splitext(rel)[0] + env["OBJSUFFIX"])
+    wrapper_obj += env_wrapper.Object(target=target, source=source)
+
+if is_windows:
+    cef_lib_dir = os.path.join(sdk_path, "Release")
+    env.Append(LIBPATH=[cef_lib_dir])
+    env.Append(LIBS=["libcef", "delayimp", "d3d12", "d3d11", "dxgi"])
+    env.Append(LINKFLAGS=["/DELAYLOAD:libcef.dll"])
+    env_cef.AppendUnique(CPPDEFINES=["VK_USE_PLATFORM_WIN32_KHR"])
+    env_cef.Prepend(CPPPATH=["#thirdparty/vulkan/include"])
+elif is_macos:
+    env.Append(LINKFLAGS=["-framework", "IOSurface", "-framework", "Metal", "-framework", "IOKit"])
+
+# Engine module.
+module_sources = [
+    "register_types.cpp",
+    "cef_ipc_inspector.cpp",
+    "cef_texture.cpp",
+    "cef_texture_2d.cpp",
+    "godot_cef_app.cpp",
+    "godot_cef_browser.cpp",
+    "godot_cef_data.cpp",
+    "godot_cef_input.cpp",
+    "godot_cef_input_map.cpp",
+    "godot_cef_ipc.cpp",
+    "godot_cef_osr.cpp",
+    "godot_cef_paths.cpp",
+    "godot_cef_runtime.cpp",
+    "godot_cef_scheme.cpp",
+    "godot_cef_scheme_util.cpp",
+    "godot_cef_settings.cpp",
+]
+if is_macos:
+    module_sources += ["godot_cef_osr_metal.mm"]
+if is_windows:
+    module_sources += ["godot_cef_osr_d3d12.cpp", "godot_cef_osr_vulkan.cpp"]
+if env.editor_build:
+    module_sources += ["editor/godot_cef_export_plugin.cpp"]
+
+env_cef.add_source_files(env.modules_sources, module_sources)
+env.modules_sources += wrapper_obj
+
+# Subprocess helper: a plain CEF program without engine code.
+env_helper = env_cef.Clone()
+env_helper["LIBS"] = []
+helper_obj = []
+env_helper.add_source_files(helper_obj, ["helper/godot_cef_helper_main.cpp", "helper/godot_cef_render_app.cpp"])
+if is_windows:
+    env_helper.Append(LIBPATH=[os.path.join(sdk_path, "Release")])
+    env_helper.Append(LIBS=["libcef", "user32", "advapi32", "shell32", "ole32"])
+    env_helper["LINKFLAGS"] = [
+        f for f in env_helper["LINKFLAGS"] if not str(f).startswith(("/SUBSYSTEM", "/ENTRY"))
+    ]
+    env_helper.Append(LINKFLAGS=["/SUBSYSTEM:WINDOWS", "/ENTRY:mainCRTStartup"])
+
+helper_name = "#bin/godot_cef_helper" + env["PROGSUFFIX"]
+helper_program = env_helper.add_program(helper_name, helper_obj + wrapper_obj)
+
+# Do not call Default() here: that would replace SCons' "build the engine" default
+# with only the helper/runtime. Attach them to the module so a normal build produces both.
+if env.modules_sources:
+    env.Depends(env.modules_sources[0], helper_program)
+    if env["godot_cef_bundle_runtime"]:
+        runtime_stamp = env.CommandNoCache(
+            "#bin/GodotCEF/.godot_cef_runtime",
+            helper_program + [os.path.join(sdk_path, "include", "cef_version.h")],
+            env.Run(godot_cef_builders.make_runtime_bundle),
+            GODOT_CEF_SDK_PATH=sdk_path,
+            GODOT_CEF_PLATFORM=env["platform"],
+        )
+        env.Depends(env.modules_sources[0], runtime_stamp)
+elif env["godot_cef_bundle_runtime"]:
+    env.CommandNoCache(
+        "#bin/GodotCEF/.godot_cef_runtime",
+        helper_program + [os.path.join(sdk_path, "include", "cef_version.h")],
+        env.Run(godot_cef_builders.make_runtime_bundle),
+        GODOT_CEF_SDK_PATH=sdk_path,
+        GODOT_CEF_PLATFORM=env["platform"],
+    )

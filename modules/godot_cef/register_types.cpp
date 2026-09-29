@@ -13,12 +13,12 @@
 
 #include "core/object/class_db.h"
 
-void initialize_godot_cef_module(ModuleInitializationLevel p_level) {
-	if (p_level == MODULE_INITIALIZATION_LEVEL_CORE) {
-		GodotCefRuntime::initialize();
-		return;
-	}
+#ifdef TOOLS_ENABLED
+#include "editor/godot_cef_export_plugin.h"
+#include "editor/plugins/editor_plugin.h"
+#endif
 
+void initialize_godot_cef_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		GDREGISTER_CLASS(CefTexture2D);
 		GDREGISTER_CLASS(CefTexture);
@@ -30,11 +30,22 @@ void initialize_godot_cef_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(CookieInfo);
 
 		GodotCefSettings::register_project_settings();
+		GodotCefRuntime::initialize();
 	}
+
+#ifdef TOOLS_ENABLED
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		GDREGISTER_INTERNAL_CLASS(GodotCefExportPlugin);
+		GDREGISTER_INTERNAL_CLASS(GodotCefEditorPlugin);
+		EditorPlugins::add_by_type<GodotCefEditorPlugin>();
+	}
+#endif
 }
 
 void uninitialize_godot_cef_module(ModuleInitializationLevel p_level) {
-	if (p_level == MODULE_INITIALIZATION_LEVEL_CORE) {
+	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+		// The scene tree is already gone, the RenderingServer still exists.
 		GodotCefRuntime::shutdown();
+		CefTexture::cleanup_shared_resources();
 	}
 }

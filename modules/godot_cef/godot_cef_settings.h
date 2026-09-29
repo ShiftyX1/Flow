@@ -50,4 +50,14 @@ public:
 	static String get_data_path();
 	static int get_remote_devtools_port();
 	static bool is_audio_capture_enabled();
+	static bool is_insecure_content_allowed();
+	static bool is_certificate_errors_ignored();
+	static bool is_web_security_disabled();
+	static PermissionPolicy get_default_permission_policy();
+	static int get_max_frame_rate();
+	static int get_cache_size_mb();
+	static String get_user_agent();
+	static String get_proxy_server();
+	static String get_proxy_bypass_list();
+	static Vector<String> get_custom_switches();
 };

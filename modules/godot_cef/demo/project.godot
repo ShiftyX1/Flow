@@ -1,0 +1,20 @@
+; Open this project with a Flow build that includes the godot_cef module
+; and a bundled CEF runtime next to the editor binary.
+config_version=5
+
+[application]
+config/name="Godot CEF Demo"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[display]
+window/size/viewport_width=1400
+window/size/viewport_height=800
+window/stretch/mode="canvas_items"
+
+[godot_cef]
+debug/remote_devtools_port=9229
+
+[rendering]
+renderer/rendering_method="forward_plus"
+environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)

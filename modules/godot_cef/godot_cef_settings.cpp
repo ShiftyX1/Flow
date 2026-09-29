@@ -60,3 +60,55 @@ int GodotCefSettings::get_remote_devtools_port() {
 bool GodotCefSettings::is_audio_capture_enabled() {
 	return GLOBAL_GET(SETTING_ENABLE_AUDIO_CAPTURE);
 }
+
+bool GodotCefSettings::is_insecure_content_allowed() {
+	return GLOBAL_GET(SETTING_ALLOW_INSECURE_CONTENT);
+}
+
+bool GodotCefSettings::is_certificate_errors_ignored() {
+	return GLOBAL_GET(SETTING_IGNORE_CERTIFICATE_ERRORS);
+}
+
+bool GodotCefSettings::is_web_security_disabled() {
+	return GLOBAL_GET(SETTING_DISABLE_WEB_SECURITY);
+}
+
+GodotCefSettings::PermissionPolicy GodotCefSettings::get_default_permission_policy() {
+	const int policy = GLOBAL_GET(SETTING_DEFAULT_PERMISSION_POLICY);
+	if (policy < PERMISSION_POLICY_DENY_ALL || policy > PERMISSION_POLICY_SIGNAL) {
+		return PERMISSION_POLICY_DENY_ALL;
+	}
+	return PermissionPolicy(policy);
+}
+
+int GodotCefSettings::get_max_frame_rate() {
+	return MAX(0, int(GLOBAL_GET(SETTING_MAX_FRAME_RATE)));
+}
+
+int GodotCefSettings::get_cache_size_mb() {
+	return MAX(0, int(GLOBAL_GET(SETTING_CACHE_SIZE_MB)));
+}
+
+String GodotCefSettings::get_user_agent() {
+	return String(GLOBAL_GET(SETTING_USER_AGENT)).strip_edges();
+}
+
+String GodotCefSettings::get_proxy_server() {
+	return String(GLOBAL_GET(SETTING_PROXY_SERVER)).strip_edges();
+}
+
+String GodotCefSettings::get_proxy_bypass_list() {
+	return String(GLOBAL_GET(SETTING_PROXY_BYPASS_LIST)).strip_edges();
+}
+
+Vector<String> GodotCefSettings::get_custom_switches() {
+	Vector<String> switches;
+	const String raw = GLOBAL_GET(SETTING_CUSTOM_SWITCHES);
+	for (const String &line : raw.replace("\r", "\n").split("\n", false)) {
+		const String stripped = line.strip_edges();
+		if (!stripped.is_empty()) {
+			switches.push_back(stripped);
+		}
+	}
+	return switches;
+}

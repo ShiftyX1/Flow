@@ -1,0 +1,80 @@
+[gd_scene load_steps=6 format=3 uid="uid://godotcefdemo"]
+
+[ext_resource type="Script" path="res://main.gd" id="1_script"]
+
+[sub_resource type="CefTexture2D" id="MeshBrowser"]
+url = "res://ui/index.html"
+texture_size = Vector2i(1024, 1024)
+enable_accelerated_osr = true
+
+[sub_resource type="StandardMaterial3D" id="ScreenMat"]
+albedo_texture = SubResource("MeshBrowser")
+metallic = 0.1
+roughness = 0.35
+
+[sub_resource type="QuadMesh" id="ScreenMesh"]
+size = Vector2(1.6, 0.9)
+
+[sub_resource type="Environment" id="WorldEnv"]
+background_mode = 1
+background_color = Color(0.07, 0.08, 0.11, 1)
+
+[node name="Demo" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Status" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 16.0
+offset_top = 12.0
+offset_right = -16.0
+offset_bottom = 40.0
+text = "Godot CEF demo"
+
+[node name="Split" type="HSplitContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 48.0
+offset_right = -12.0
+offset_bottom = -12.0
+split_offset = 220
+
+[node name="Menu" type="CefTexture" parent="Split"]
+layout_mode = 2
+size_flags_horizontal = 3
+url = "res://ui/"
+enable_accelerated_osr = true
+
+[node name="World" type="SubViewportContainer" parent="Split"]
+layout_mode = 2
+size_flags_horizontal = 3
+stretch = true
+
+[node name="SubViewport" type="SubViewport" parent="Split/World"]
+handle_input_locally = false
+size = Vector2i(640, 720)
+render_target_update_mode = 4
+
+[node name="Camera3D" type="Camera3D" parent="Split/World/SubViewport"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 2.2)
+current = true
+
+[node name="Sun" type="DirectionalLight3D" parent="Split/World/SubViewport"]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 2, 2)
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="Split/World/SubViewport"]
+environment = SubResource("WorldEnv")
+
+[node name="Screen" type="MeshInstance3D" parent="Split/World/SubViewport"]
+mesh = SubResource("ScreenMesh")
+material_override = SubResource("ScreenMat")

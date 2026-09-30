@@ -622,7 +622,9 @@ void VoxelWorld::_update_day_night_cycle(float p_delta, float p_local_light) {
 			float ambient_lum = ambient.get_luminance();
 			ambient = ambient.lerp(Color(ambient_lum, ambient_lum, ambient_lum), overcast_amount * 0.6f);
 			env->set_ambient_light_color(ambient);
-			env->set_ambient_light_energy(Math::lerp(0.15f, 0.5f, day_factor) * diffuse_weather);
+			// Voxel albedo is no longer pre-darkened by the baked sun, so ambient is
+			// kept lower to leave shaded faces visibly darker than sunlit ones.
+			env->set_ambient_light_energy(Math::lerp(0.15f, 0.35f, day_factor) * diffuse_weather);
 
 			// Fog.
 			if (fog_enabled) {
@@ -867,18 +869,29 @@ float cloud_shadow() {
 }
 void fragment() {
 	vec4 base = use_texture ? texture(texture_albedo, UV) : vec4(1.0);
+	// Albedo stays untouched: darkening it would light the block twice (baked sun
+	// here, then again by the DirectionalLight3D N.L and the ambient term).
 	ALBEDO = base.rgb * COLOR.rgb;
-	// Sunlight modulation + AO. Block light is handled by OmniLight3D nodes.
-	float sun = voxel_light.r * voxel_sun_intensity * cloud_shadow();
-	float ao = voxel_light.b;
-	float brightness = sun * ao;
-	// Minimum ambient so caves are never pitch black.
-	brightness = max(brightness, 0.03);
-	ALBEDO *= brightness;
+	// Baked AO and skylight only modulate ambient light. Direct light is handled
+	// in light(). Block light is handled by OmniLight3D nodes.
+	float sky = voxel_light.r;
+	AO = voxel_light.b * mix(0.08, 1.0, sky);
+	AO_LIGHT_AFFECT = 0.25;
+	ROUGHNESS = 1.0;
+	SPECULAR = 0.0;
 	if (use_texture) {
 		ALPHA = base.a * COLOR.a;
 		ALPHA_SCISSOR_THRESHOLD = 0.5;
 	}
+}
+void light() {
+	float n_dot_l = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	float vis = ATTENUATION;
+	if (LIGHT_IS_DIRECTIONAL) {
+		// Sun/moon only reach voxels that see the sky and are outside cloud shadows.
+		vis *= voxel_light.r * cloud_shadow();
+	}
+	DIFFUSE_LIGHT += n_dot_l * vis * LIGHT_COLOR / PI;
 }
 )";
 		voxel_shader->set_code(shader_code);

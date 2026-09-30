@@ -836,6 +836,23 @@ void ModelRig::_sample_pose() {
 		touched.write[i] = 0;
 	}
 
+	// Pass 1: pre_animation scripts (shared variables, smoothing).
+	for (int ti = 0; ti < tracks.size(); ti++) {
+		const Track &t = tracks[ti];
+		if (t.phase == FADE_OUT && t.fade <= 0.0f) {
+			continue;
+		}
+		const RigAnimationData::Clip *clip = t.data->find_clip(t.clip);
+		if (!clip || clip->pre_animation.is_empty()) {
+			continue;
+		}
+		ctx.set(q_anim_time, t.time);
+		for (int k = 0; k < clip->pre_animation.size(); k++) {
+			clip->pre_animation[k].evaluate(ctx);
+		}
+	}
+
+	// Pass 2: sampling.
 	for (int ti = 0; ti < tracks.size(); ti++) {
 		Track &t = tracks.write[ti];
 		const RigAnimationData::Clip *clip = t.data->find_clip(t.clip);

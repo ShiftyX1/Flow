@@ -97,4 +97,30 @@ TEST_CASE("[RigModel] Animation clips are found by exact and suffix name") {
 	CHECK(anim->get_animation_length("wave") == doctest::Approx(2.0f));
 }
 
+TEST_CASE("[RigModel] Clip pre_animation scripts are parsed and share variables") {
+	const String json = R"({
+		"animations": {
+			"animation.test.vars": {
+				"loop": true,
+				"animation_length": 1.0,
+				"pre_animation": ["variable.a = 3", "variable.b = variable.a * 2"],
+				"bones": {}
+			}
+		}
+	})";
+
+	Ref<RigAnimationData> anim;
+	anim.instantiate();
+	REQUIRE(anim->parse_json(json) == OK);
+	const RigAnimationData::Clip *clip = anim->find_clip("vars");
+	REQUIRE(clip != nullptr);
+	REQUIRE(clip->pre_animation.size() == 2);
+
+	RigExpressionContext ctx;
+	for (int i = 0; i < clip->pre_animation.size(); i++) {
+		clip->pre_animation[i].evaluate(ctx);
+	}
+	CHECK(ctx.get(RigExpression::normalize_name("variable.b")) == doctest::Approx(6.0f));
+}
+
 } // namespace TestRigModel

@@ -216,6 +216,25 @@ Error RigAnimationData::parse_json(const String &p_json_text) {
 			}
 		}
 
+		if (cd.has("pre_animation")) {
+			Vector<String> scripts;
+			if (cd["pre_animation"].get_type() == Variant::ARRAY) {
+				const Array arr = cd["pre_animation"];
+				for (int i = 0; i < arr.size(); i++) {
+					scripts.push_back(String(arr[i]));
+				}
+			} else {
+				scripts.push_back(String(cd["pre_animation"]));
+			}
+			for (int i = 0; i < scripts.size(); i++) {
+				RigExpression expr;
+				if (expr.parse(scripts[i]) != OK) {
+					WARN_PRINT(vformat("RigAnimationData: %s/pre_animation: %s", clip_name, expr.get_error()));
+				}
+				clip.pre_animation.push_back(expr);
+			}
+		}
+
 		clip.length = cd.has("animation_length") ? (float)(double)cd["animation_length"] : max_time;
 		if (clip.length <= 0.0f) {
 			clip.length = max_time;

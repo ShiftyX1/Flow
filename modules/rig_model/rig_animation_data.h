@@ -20,6 +20,9 @@
 // "pre"/"post" and "lerp_mode": "catmullrom". Values are relative to the bone rest pose:
 // rotations and positions are added, scale multiplies.
 //
+// A clip may carry "pre_animation": ["variable.a = ...;", ...] scripts. They run every frame for
+// every live clip (even at zero blend weight), in track order, before any channel is sampled.
+//
 // Deviations from Bedrock: a non-looping clip holds its last pose after finishing
 // (both `false` and "hold_on_last_frame" behave the same); sound/particle events are ignored.
 class RigAnimationData : public Resource {
@@ -57,6 +60,9 @@ public:
 		StringName name;
 		LoopMode loop = LOOP_ONCE;
 		float length = 0.0f;
+		// Scripts run once per frame before the clip's channels are sampled (Bedrock "pre_animation").
+		// They are the place for shared `variable.*` math and smoothing.
+		Vector<RigExpression> pre_animation;
 		Vector<BoneTrack> tracks;
 	};
 

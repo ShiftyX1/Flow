@@ -1018,7 +1018,15 @@ Vector<uint16_t> VoxelTerrainGenerator::generate_chunk_data(int p_chunk_x, int p
 					// Scatter: only inside chunk bounds (no border needed).
 					if (local_x >= 0 && local_x < CHUNK_SIZE_X && local_z >= 0 && local_z < CHUNK_SIZE_Z) {
 						if (sh >= fc.min_y && sh <= fc.max_y) {
-							_place_scatter(blocks_w, local_x, sh, local_z, (uint16_t)fc.block);
+							// Ground filter: the block under the scatter block must be allowed.
+							bool ground_ok = fc.ground_blocks.is_empty();
+							if (!ground_ok && sh >= 0 && sh < CHUNK_SIZE_Y) {
+								const int ground_block = (int)blocks_w[block_index(local_x, sh, local_z)];
+								ground_ok = fc.ground_blocks.has(ground_block);
+							}
+							if (ground_ok) {
+								_place_scatter(blocks_w, local_x, sh, local_z, (uint16_t)fc.block);
+							}
 						}
 					}
 				}

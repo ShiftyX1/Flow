@@ -196,6 +196,7 @@ void VoxelWorld::_bind_methods() {
 	BIND_CONSTANT(VOXEL_BLOCK_BEACON_CORE);
 	BIND_CONSTANT(VOXEL_BLOCK_IRON_ORE);
 	BIND_CONSTANT(VOXEL_BLOCK_COPPER_ORE);
+	BIND_CONSTANT(VOXEL_BLOCK_TALL_GRASS);
 }
 
 VoxelWorld::VoxelWorld() {
@@ -1241,7 +1242,7 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	if (data->neighbor_light_pz.size() > 0) { mesh_nl.pz = data->neighbor_light_pz.ptr(); }
 	if (data->neighbor_light_nz.size() > 0) { mesh_nl.nz = data->neighbor_light_nz.ptr(); }
 
-	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, nb, result.light_data.ptr(), mesh_nl);
+	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, nb, result.light_data.ptr(), mesh_nl, data->key);
 
 	{
 		MutexLock lock(world->finished_mutex);
@@ -1700,7 +1701,7 @@ void VoxelWorld::_rebuild_chunk_mesh(VoxelChunk *p_chunk) {
 
 	Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(
 			p_chunk->get_blocks(), block_size, block_registry, nb,
-			p_chunk->get_light_data().ptr(), mesh_nl);
+			p_chunk->get_light_data().ptr(), mesh_nl, cpos);
 	_apply_surfaces_to_chunk(p_chunk, surfaces);
 }
 
@@ -2729,7 +2730,8 @@ static int _voxel_world_floor_div(int p_value, int p_divisor) {
 
 static bool _voxel_world_is_non_terrain_block(int p_block_id) {
 	return p_block_id == VOXEL_BLOCK_AIR || p_block_id == VOXEL_BLOCK_LEAVES || p_block_id == VOXEL_BLOCK_WOOD ||
-			p_block_id == VOXEL_BLOCK_BIOLUMEN_PLANT || p_block_id == VOXEL_BLOCK_TORCH;
+			p_block_id == VOXEL_BLOCK_BIOLUMEN_PLANT || p_block_id == VOXEL_BLOCK_TORCH ||
+			p_block_id == VOXEL_BLOCK_TALL_GRASS;
 }
 
 void VoxelWorld::_reset_placement_caches() {
@@ -3482,6 +3484,7 @@ Dictionary VoxelWorld::raycast_block(const Vector3 &p_origin, const Vector3 &p_d
 
 // move_body: axis-separated AABB sweep against voxel grid
 
+// Fallback used only when no block registry is available.
 static _FORCE_INLINE_ bool _is_block_solid(int p_block_id) {
 	return p_block_id != VOXEL_BLOCK_AIR && p_block_id != VOXEL_BLOCK_WATER;
 }
@@ -3524,7 +3527,9 @@ Dictionary VoxelWorld::move_body(const AABB &p_body, const Vector3 &p_velocity, 
 				for (int bx = min_bx; bx <= max_bx; bx++) {
 					Vector3 bc((bx + 0.5f) * bs, (by + 0.5f) * bs, (bz + 0.5f) * bs);
 					int bid = get_block_at(bc);
-					if (!_is_block_solid(bid)) {
+					// Non-solid registry blocks (plants, grass, torches, fluids) never collide with bodies.
+					const bool collides = block_registry.is_valid() ? block_registry->is_solid(bid) : _is_block_solid(bid);
+					if (!collides) {
 						continue;
 					}
 

@@ -353,6 +353,7 @@ Scatter places single blocks on the terrain surface (e.g. flowers, mushrooms, ro
 | `min_y`        | int    | 0       | Minimum Y level for placement                  |
 | `max_y`        | int    | 192     | Maximum Y level for placement                  |
 | `surface_only` | bool   | true    | Only place on the terrain surface              |
+| `ground_blocks`| Array  | `[]`    | Block IDs the scatter block may stand on (the block directly under it); empty = any |
 
 **Feature salt**: Each feature in a biome's feature array uses a unique hash salt (based on its index), ensuring different features don't always coincide at the same positions.
 

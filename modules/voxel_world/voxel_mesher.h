@@ -4,6 +4,7 @@
 #include "voxel_terrain_generator.h"
 
 #include "core/math/vector2.h"
+#include "core/math/vector2i.h"
 #include "core/math/vector3.h"
 #include "core/templates/hash_map.h"
 #include "core/variant/array.h"
@@ -48,7 +49,11 @@ public:
 		float ao;
 	};
 
-	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint16_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const NeighborBlocks &p_neighbors = NeighborBlocks(), const uint8_t *p_light_data = nullptr, const NeighborLight &p_neighbor_light = NeighborLight());
+	static Vector<MeshSurface> build_chunk_mesh(const Vector<uint16_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const NeighborBlocks &p_neighbors = NeighborBlocks(), const uint8_t *p_light_data = nullptr, const NeighborLight &p_neighbor_light = NeighborLight(), const Vector2i &p_chunk_key = Vector2i());
+
+	// Deterministic per-cell random offset in [-1, 1] on X and Z, derived from world block coordinates.
+	// Used to scatter plants ("random_offset" tag) inside their cell; stable across remeshes and chunk borders.
+	static Vector2 plant_cell_offset(int p_world_x, int p_world_y, int p_world_z);
 
 	// Build a mesh for a finite voxel volume with arbitrary dimensions.
 	// Used by VoxelScene (no streaming, no neighbor chunks, no BFS sunlight).

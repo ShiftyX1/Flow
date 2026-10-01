@@ -226,6 +226,7 @@ void VoxelBlockRegistry::_build_cache() {
 	cache_visual_mode.resize(count);
 	cache_is_fluid.resize(count);
 	cache_replaceable.resize(count);
+	cache_random_offset.resize(count);
 
 	for (int i = 0; i < count; i++) {
 		const BlockEntry &e = blocks[i];
@@ -240,6 +241,14 @@ void VoxelBlockRegistry::_build_cache() {
 		cache_visual_mode.write[i] = (uint8_t)e.visual_mode;
 		cache_is_fluid.write[i] = e.is_fluid;
 		cache_replaceable.write[i] = e.replaceable;
+		bool random_offset = false;
+		for (int t = 0; t < e.tags.size(); t++) {
+			if (e.tags[t] == "random_offset") {
+				random_offset = true;
+				break;
+			}
+		}
+		cache_random_offset.write[i] = random_offset;
 	}
 }
 
@@ -1103,6 +1112,9 @@ void VoxelBlockRegistry::setup_defaults() {
 		if (p_props.has("replaceable") && !entry.replaceable) {
 			entry.replaceable = p_props["replaceable"];
 		}
+		if (p_props.has("hand_break_time")) {
+			entry.hand_break_time = MAX((float)p_props["hand_break_time"], 0.0f);
+		}
 	};
 
 	Dictionary d;
@@ -1202,6 +1214,7 @@ void VoxelBlockRegistry::setup_defaults() {
 	biolumen_tags.push_back("organic");
 	biolumen_tags.push_back("flora");
 	biolumen_tags.push_back("restored_forest");
+	biolumen_tags.push_back("random_offset");
 	d["tags"] = biolumen_tags;
 	reg("biolumen_plant", 11, d);
 
@@ -1270,6 +1283,23 @@ void VoxelBlockRegistry::setup_defaults() {
 	copper_ore_tags.push_back("metal");
 	d["tags"] = copper_ore_tags;
 	reg("copper_ore", 16, d);
+
+	// 17: TALL GRASS (decorative ground cover, no drop)
+	d.clear();
+	d["color"] = Color(0.36f, 0.63f, 0.20f, 0.92f);
+	d["solid"] = false;
+	d["transparent"] = true;
+	d["uses_alpha"] = true;
+	d["light_opacity"] = 0;
+	d["shape"] = "cross_plant";
+	d["replaceable"] = true;
+	d["hand_break_time"] = 0.1f;
+	PackedStringArray tall_grass_tags;
+	tall_grass_tags.push_back("organic");
+	tall_grass_tags.push_back("flora");
+	tall_grass_tags.push_back("random_offset");
+	d["tags"] = tall_grass_tags;
+	reg("tall_grass", 17, d);
 }
 
 // --- Mining / survival implementations ---

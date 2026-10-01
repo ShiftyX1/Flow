@@ -136,6 +136,18 @@ _Avoid_: Repair quest, direct resource payment
 Travel initiated at the Landing Module or an eligible activated Restoration Beacon and ending at another such point without traversing the intervening terrain.
 _Avoid_: Teleport command, respawn
 
+**Study**:
+The suit's hold-to-confirm reading of a targeted Block, World Object or Entity, which files a Codex Entry and shows it as a callout joined to the studied subject. Study is informational only: it never unlocks recipes.
+_Avoid_: Scan, research, Material Analysis
+
+**Codex Entry**:
+The suit's record of one studied subject. Its title and category are always shown; its description and attributes are Revealed Information that the server only sends once the subject has been obtained or discovered.
+_Avoid_: Journal page, tech tree node
+
+**Revealed Information**:
+The tiers of a Codex Entry: basic (title, category), details (description, attributes; need the subject to be obtained or discovered) and applications (recipes; need Material Analysis). Hidden tiers are shown as "???".
+_Avoid_: Skill unlock, progression gate
+
 **Contextual Feedback**:
 Interface information that explains the currently targeted object, available interaction, or reason an action cannot proceed without prescribing a progression path.
 _Avoid_: Quest marker, checklist, tutorial chain

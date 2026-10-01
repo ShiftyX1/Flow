@@ -42,6 +42,9 @@ public:
 		int min_y = 0;
 		int max_y = 192;
 		bool surface_only = true;
+		// Block IDs the scatter block may stand on (the block directly under it).
+		// Empty = any ground.
+		Vector<int> ground_blocks;
 	};
 
 	struct BiomeEntry {

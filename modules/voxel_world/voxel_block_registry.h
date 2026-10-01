@@ -38,6 +38,7 @@ static constexpr int VOXEL_BLOCK_RUSTED_PANEL = 13;
 static constexpr int VOXEL_BLOCK_BEACON_CORE = 14;
 static constexpr int VOXEL_BLOCK_IRON_ORE = 15;
 static constexpr int VOXEL_BLOCK_COPPER_ORE = 16;
+static constexpr int VOXEL_BLOCK_TALL_GRASS = 17;
 
 // Dynamic block registry: single source of truth for all block definitions.
 // Blocks are registered at startup, then finalize() builds flat cache arrays
@@ -132,6 +133,7 @@ private:
 	Vector<uint8_t> cache_visual_mode;
 	Vector<bool> cache_is_fluid;
 	Vector<bool> cache_replaceable;
+	Vector<bool> cache_random_offset;
 
 	void _build_cache();
 
@@ -335,6 +337,12 @@ public:
 	}
 	_FORCE_INLINE_ bool is_replaceable_cached(int p_id) const {
 		return p_id >= 0 && p_id < cache_replaceable.size() && cache_replaceable[p_id];
+	}
+
+	// True when the block carries the "random_offset" tag: the mesher shifts each placed
+	// instance (cross_plant shapes) to a deterministic random spot inside its cell.
+	_FORCE_INLINE_ bool has_random_offset_cached(int p_id) const {
+		return p_id >= 0 && p_id < cache_random_offset.size() && cache_random_offset[p_id];
 	}
 
 	// Direct access to cache arrays for passing to worker threads.

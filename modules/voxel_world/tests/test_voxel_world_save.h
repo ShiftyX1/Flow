@@ -288,6 +288,152 @@ TEST_CASE("[VoxelWorld] Underground ore veins are deterministic and seed-depende
 	CHECK(seed_changed_layout);
 }
 
+TEST_CASE("[VoxelWorld] Default block registry exposes tall grass ground cover") {
+	Ref<VoxelBlockRegistry> blocks;
+	blocks.instantiate();
+	blocks->setup_defaults();
+
+	CHECK(blocks->get_block_name(VOXEL_BLOCK_TALL_GRASS) == String("tall_grass"));
+	CHECK(blocks->get_block_shape(VOXEL_BLOCK_TALL_GRASS) == VoxelBlockRegistry::BLOCK_SHAPE_CROSS_PLANT);
+	CHECK(blocks->get_block_resource_id(VOXEL_BLOCK_TALL_GRASS) == StringName());
+}
+
+TEST_CASE("[VoxelWorld] Tagged plants get a deterministic random offset inside their cell") {
+	Ref<VoxelBlockRegistry> registry;
+	registry.instantiate();
+	registry->setup_defaults();
+	registry->finalize();
+
+	CHECK(registry->has_random_offset_cached(VOXEL_BLOCK_TALL_GRASS));
+	CHECK(registry->has_random_offset_cached(VOXEL_BLOCK_BIOLUMEN_PLANT));
+	CHECK(!registry->has_random_offset_cached(VOXEL_BLOCK_TORCH));
+
+	// Offsets are bounded, deterministic and vary by cell.
+	bool varied = false;
+	const Vector2 first = VoxelMesher::plant_cell_offset(3, 70, 5);
+	for (int i = 0; i < 64; i++) {
+		const Vector2 o = VoxelMesher::plant_cell_offset(i, 70, i * 7);
+		CHECK(o.x >= -1.0f);
+		CHECK(o.x <= 1.0f);
+		CHECK(o.y >= -1.0f);
+		CHECK(o.y <= 1.0f);
+		CHECK(o == VoxelMesher::plant_cell_offset(i, 70, i * 7));
+		if (o != first) {
+			varied = true;
+		}
+	}
+	CHECK(varied);
+
+	const int total = VoxelTerrainGenerator::CHUNK_SIZE_X * VoxelTerrainGenerator::CHUNK_SIZE_Y * VoxelTerrainGenerator::CHUNK_SIZE_Z;
+	auto min_x_of = [&](int p_block, const Vector2i &p_key) -> float {
+		Vector<uint16_t> blocks;
+		blocks.resize(total);
+		for (int i = 0; i < total; i++) {
+			blocks.write[i] = VOXEL_BLOCK_AIR;
+		}
+		blocks.write[VoxelTerrainGenerator::block_index(4, 10, 4)] = (uint16_t)p_block;
+		Vector<VoxelMesher::MeshSurface> surfaces = VoxelMesher::build_chunk_mesh(blocks, 1.0f, registry, VoxelMesher::NeighborBlocks(), nullptr, VoxelMesher::NeighborLight(), p_key);
+		REQUIRE(surfaces.size() == 1);
+		Vector<Vector3> verts = surfaces[0].arrays[Mesh::ARRAY_VERTEX];
+		float min_x = 1e9f;
+		for (int i = 0; i < verts.size(); i++) {
+			min_x = MIN(min_x, verts[i].x);
+		}
+		return min_x;
+	};
+
+	// The same cell always meshes to the same place; a plant stays within +-0.3 block of its cell.
+	const float grass_a = min_x_of(VOXEL_BLOCK_TALL_GRASS, Vector2i(0, 0));
+	CHECK(grass_a == min_x_of(VOXEL_BLOCK_TALL_GRASS, Vector2i(0, 0)));
+	CHECK(Math::abs(grass_a - 4.0f) <= 0.3001f);
+	// Untagged cross plants (torch) are never shifted.
+	CHECK(min_x_of(VOXEL_BLOCK_TORCH, Vector2i(0, 0)) == 4.0f);
+	// Different chunks give different placement for the same local cell.
+	bool chunk_varies = false;
+	for (int cx = 1; cx < 8; cx++) {
+		if (min_x_of(VOXEL_BLOCK_TALL_GRASS, Vector2i(cx, 0)) != grass_a) {
+			chunk_varies = true;
+		}
+	}
+	CHECK(chunk_varies);
+}
+
+TEST_CASE("[VoxelWorld] Scatter features respect ground_blocks") {
+	Dictionary feature_dict;
+	feature_dict["type"] = "scatter";
+	feature_dict["block"] = VOXEL_BLOCK_TALL_GRASS;
+	feature_dict["density"] = 1;
+	Array ground_ids;
+	ground_ids.push_back(VOXEL_BLOCK_GRASS);
+	ground_ids.push_back(VOXEL_BLOCK_DIRT);
+	feature_dict["ground_blocks"] = ground_ids;
+
+	Ref<VoxelBiomeRegistry> biomes;
+	biomes.instantiate();
+	biomes->setup_defaults();
+	biomes->add_biome_feature(0, feature_dict);
+	Dictionary stored = biomes->get_biome_feature(0, biomes->get_biome_feature_count(0) - 1);
+	Array stored_ground = stored["ground_blocks"];
+	CHECK(stored_ground.size() == 2);
+
+	const int total = VoxelTerrainGenerator::CHUNK_SIZE_X * VoxelTerrainGenerator::CHUNK_SIZE_Y * VoxelTerrainGenerator::CHUNK_SIZE_Z;
+	auto count_grass = [&](const Array &p_ground, bool &r_all_on_allowed_ground) -> int {
+		VoxelBiomeRegistry::FeatureConfig fc;
+		fc.type = VoxelBiomeRegistry::FeatureConfig::FEATURE_SCATTER;
+		fc.block = VOXEL_BLOCK_TALL_GRASS;
+		fc.density = 1;
+		for (int i = 0; i < p_ground.size(); i++) {
+			fc.ground_blocks.push_back((int)p_ground[i]);
+		}
+
+		RuntimeBiomeData bd;
+		bd.params.height_base = 60.0f;
+		bd.params.surface_block = VOXEL_BLOCK_GRASS;
+		bd.params.subsurface_block = VOXEL_BLOCK_DIRT;
+		bd.params.snow_line = 192;
+		bd.params.features.push_back(fc);
+		bd.center = Vector2(0, 0);
+		Vector<RuntimeBiomeData> data;
+		data.push_back(bd);
+
+		VoxelTerrainGenerator gen;
+		gen.set_biome_data(data);
+		gen.set_seed(777);
+
+		int count = 0;
+		r_all_on_allowed_ground = true;
+		for (int cx = -2; cx <= 2; cx++) {
+			for (int cz = -2; cz <= 2; cz++) {
+				Vector<uint16_t> chunk = gen.generate_chunk_data(cx, cz);
+				REQUIRE(chunk.size() == total);
+				for (int y = 1; y < VoxelTerrainGenerator::CHUNK_SIZE_Y; y++) {
+					for (int z = 0; z < VoxelTerrainGenerator::CHUNK_SIZE_Z; z++) {
+						for (int x = 0; x < VoxelTerrainGenerator::CHUNK_SIZE_X; x++) {
+							if (chunk[VoxelTerrainGenerator::block_index(x, y, z)] != VOXEL_BLOCK_TALL_GRASS) {
+								continue;
+							}
+							count++;
+							const uint16_t below = chunk[VoxelTerrainGenerator::block_index(x, y - 1, z)];
+							if (below != VOXEL_BLOCK_GRASS && below != VOXEL_BLOCK_DIRT) {
+								r_all_on_allowed_ground = false;
+							}
+						}
+					}
+				}
+			}
+		}
+		return count;
+	};
+
+	bool on_allowed = true;
+	CHECK(count_grass(ground_ids, on_allowed) > 0);
+	CHECK(on_allowed);
+
+	Array stone_only;
+	stone_only.push_back(VOXEL_BLOCK_STONE);
+	CHECK(count_grass(stone_only, on_allowed) == 0);
+}
+
 TEST_CASE("[VoxelWorld] Chunk object save round-trip") {
 	const String root = "user://voxel_world_objects_test";
 	const Vector2i chunk_key(3, -1);

@@ -20,6 +20,12 @@ VoxelBiomeRegistry::FeatureConfig VoxelBiomeRegistry::_parse_feature(const Dicti
 		fc.min_y = p_dict.get("min_y", 0);
 		fc.max_y = p_dict.get("max_y", 192);
 		fc.surface_only = p_dict.get("surface_only", true);
+		if (p_dict.has("ground_blocks")) {
+			Array ground = p_dict["ground_blocks"];
+			for (int i = 0; i < ground.size(); i++) {
+				fc.ground_blocks.push_back((int)ground[i]);
+			}
+		}
 	} else {
 		// "tree" or default.
 		fc.type = FeatureConfig::FEATURE_TREE;
@@ -53,6 +59,11 @@ Dictionary VoxelBiomeRegistry::_feature_to_dict(const FeatureConfig &p_feature) 
 		d["min_y"] = p_feature.min_y;
 		d["max_y"] = p_feature.max_y;
 		d["surface_only"] = p_feature.surface_only;
+		Array ground;
+		for (int i = 0; i < p_feature.ground_blocks.size(); i++) {
+			ground.push_back(p_feature.ground_blocks[i]);
+		}
+		d["ground_blocks"] = ground;
 	} else {
 		d["type"] = "tree";
 		d["trunk_block"] = p_feature.trunk_block;

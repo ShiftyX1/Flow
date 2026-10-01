@@ -1,5 +1,8 @@
 #include "voxel_mesher.h"
 
+// Max horizontal shift of "random_offset" plants, as a fraction of a block.
+static constexpr float PLANT_OFFSET_RANGE = 0.3f;
+
 // Helper to pack a float [0,1] to uint8_t [0,255].
 static _FORCE_INLINE_ uint8_t float_to_u8(float v) {
 	return (uint8_t)CLAMP((int)(v * 255.0f + 0.5f), 0, 255);
@@ -185,7 +188,19 @@ static const FaceCorners corners_pz = { { 0, 0, -1, -1 }, { -1, 0, 0, -1 } };
 // -Z face: v0=(-1,-1), v1=(-1,+1), v2=(+1,+1), v3=(+1,-1) (u=X, v=Y)
 static const FaceCorners corners_nz = { { -1, -1, 0, 0 }, { -1, 0, 0, -1 } };
 
-Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint16_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const NeighborBlocks &p_neighbors, const uint8_t *p_light_data, const NeighborLight &p_neighbor_light) {
+Vector2 VoxelMesher::plant_cell_offset(int p_world_x, int p_world_y, int p_world_z) {
+	uint32_t h = (uint32_t)p_world_x * 73856093U ^ (uint32_t)p_world_y * 19349663U ^ (uint32_t)p_world_z * 83492791U;
+	h ^= h >> 16;
+	h *= 0x7feb352dU;
+	h ^= h >> 15;
+	h *= 0x846ca68bU;
+	h ^= h >> 16;
+	const float fx = (float)(h & 0xFFFFU) / 65535.0f;
+	const float fz = (float)((h >> 16) & 0xFFFFU) / 65535.0f;
+	return Vector2(fx * 2.0f - 1.0f, fz * 2.0f - 1.0f);
+}
+
+Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint16_t> &p_blocks, float p_block_size, const Ref<VoxelBlockRegistry> &p_registry, const NeighborBlocks &p_neighbors, const uint8_t *p_light_data, const NeighborLight &p_neighbor_light, const Vector2i &p_chunk_key) {
 	const uint16_t *blocks = p_blocks.ptr();
 
 	SurfaceData untextured_surface;
@@ -289,13 +304,21 @@ Vector<VoxelMesher::MeshSurface> VoxelMesher::build_chunk_mesh(const Vector<uint
 					SurfaceData *surf = get_custom_surface(tex);
 					Color face_col = tex.is_valid() ? Color(1, 1, 1) : col;
 					if (shape == VoxelBlockRegistry::BLOCK_SHAPE_CROSS_PLANT) {
+						// Plants tagged "random_offset" always sit at a random spot of their cell (up to
+						// +-PLANT_OFFSET_RANGE of a block on X/Z), stable for a given world position.
+						Vector3 plant_origin = origin;
+						if (use_registry && reg->has_random_offset_cached(type)) {
+							const Vector2 jitter = plant_cell_offset(p_chunk_key.x * CX + x, y, p_chunk_key.y * CZ + z);
+							plant_origin.x += jitter.x * PLANT_OFFSET_RANGE * bs;
+							plant_origin.z += jitter.y * PLANT_OFFSET_RANGE * bs;
+						}
 						add_double_sided_face(*surf,
-								origin + Vector3(0, 0, 0), origin + Vector3(0, top_y, 0),
-								origin + Vector3(bs, top_y, bs), origin + Vector3(bs, 0, bs),
+								plant_origin + Vector3(0, 0, 0), plant_origin + Vector3(0, top_y, 0),
+								plant_origin + Vector3(bs, top_y, bs), plant_origin + Vector3(bs, 0, bs),
 								Vector3(-0.707f, 0, 0.707f), face_col, tex.is_valid());
 						add_double_sided_face(*surf,
-								origin + Vector3(bs, 0, 0), origin + Vector3(bs, top_y, 0),
-								origin + Vector3(0, top_y, bs), origin + Vector3(0, 0, bs),
+								plant_origin + Vector3(bs, 0, 0), plant_origin + Vector3(bs, top_y, 0),
+								plant_origin + Vector3(0, top_y, bs), plant_origin + Vector3(0, 0, bs),
 								Vector3(0.707f, 0, 0.707f), face_col, tex.is_valid());
 					} else if (shape == VoxelBlockRegistry::BLOCK_SHAPE_LADDER) {
 						const float z = bs * 0.04f;

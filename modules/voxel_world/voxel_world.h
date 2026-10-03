@@ -126,6 +126,7 @@ private:
 		Vector<VoxelMesher::MeshSurface> surfaces;
 		bool is_remesh = false; // true = update existing chunk, false = create new chunk
 		bool blocks_from_save = false;
+		bool structures_applied = false; // Landing crater / structures already baked into blocks off-thread.
 	};
 
 	// Chunks currently being generated on background threads.

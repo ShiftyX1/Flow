@@ -12,11 +12,15 @@
 #include "scene/resources/mesh.h"
 #include "scene/resources/texture.h"
 #include "servers/rendering/rendering_server_enums.h"
+#include "servers/rendering/rendering_server_types.h"
 
 class VoxelMesher {
 public:
 	struct MeshSurface {
 		Array arrays;
+		// GPU-ready surface data converted off the main thread.
+		RenderingServerTypes::SurfaceData prebuilt;
+		bool has_prebuilt = false;
 		uint64_t custom_format_flags = 0; // Mesh format flags for custom vertex attributes.
 		Ref<Texture2D> texture; // null = vertex-colored (no texture).
 		Ref<ShaderMaterial> shader_material; // Optional custom shader for this surface.

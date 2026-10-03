@@ -1205,6 +1205,16 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 				result.blocks_from_save = true;
 			}
 		}
+		// Bake landing crater and structures into the blocks here (worker thread) so the main thread
+		// does not have to re-mesh the whole chunk synchronously after integrating it.
+		if (!result.blocks_from_save) {
+			VoxelChunk scratch;
+			scratch.set_blocks(result.blocks);
+			if (world->_apply_structures_to_chunk(data->key, &scratch, false)) {
+				result.blocks = scratch.get_blocks();
+			}
+		}
+		result.structures_applied = true;
 	}
 
 	// --- Light propagation ---
@@ -1243,6 +1253,15 @@ void VoxelWorld::_chunk_generation_task(void *p_userdata) {
 	if (data->neighbor_light_nz.size() > 0) { mesh_nl.nz = data->neighbor_light_nz.ptr(); }
 
 	result.surfaces = VoxelMesher::build_chunk_mesh(result.blocks, world->block_size, world->block_registry, nb, result.light_data.ptr(), mesh_nl, data->key);
+	// Convert vertex arrays to GPU-ready buffers here (worker thread). This is the most expensive part of
+	// surface creation, so the main thread only has to upload the prepared data.
+	for (int i = 0; i < result.surfaces.size(); i++) {
+		VoxelMesher::MeshSurface &ms = result.surfaces.write[i];
+		if (RS::get_singleton()->mesh_create_surface_data_from_arrays(&ms.prebuilt, RSE::PRIMITIVE_TRIANGLES, ms.arrays, Array(), Dictionary(), ms.custom_format_flags) == OK) {
+			ms.has_prebuilt = true;
+			ms.arrays = Array();
+		}
+	}
 
 	{
 		MutexLock lock(world->finished_mutex);
@@ -1372,7 +1391,12 @@ void VoxelWorld::_apply_surfaces_to_chunk(VoxelChunk *p_chunk, const Vector<Voxe
 
 	for (int s = 0; s < p_surfaces.size(); s++) {
 		uint64_t fmt_flags = p_surfaces[s].custom_format_flags;
-		array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, p_surfaces[s].arrays, Array(), Dictionary(), fmt_flags);
+		if (p_surfaces[s].has_prebuilt) {
+			const RenderingServerTypes::SurfaceData &sd = p_surfaces[s].prebuilt;
+			array_mesh->add_surface(sd.format, Mesh::PrimitiveType(sd.primitive), sd.vertex_data, sd.attribute_data, sd.skin_data, sd.vertex_count, sd.index_data, sd.index_count, sd.aabb, sd.blend_shape_data, sd.bone_aabbs, sd.lods, sd.uv_scale);
+		} else {
+			array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, p_surfaces[s].arrays, Array(), Dictionary(), fmt_flags);
+		}
 		Ref<Material> surface_material;
 		if (p_surfaces[s].shader_material.is_valid()) {
 			Ref<ShaderMaterial> mat = p_surfaces[s].shader_material;
@@ -1841,7 +1865,7 @@ void VoxelWorld::_integrate_finished_chunks() {
 
 		// Register the chunk and apply the pre-built surfaces (built off-thread).
 		loaded_chunks[result.key] = chunk;
-		const bool structures_modified = _apply_structures_to_chunk(result.key, chunk, result.blocks_from_save);
+		const bool structures_modified = result.structures_applied ? false : _apply_structures_to_chunk(result.key, chunk, result.blocks_from_save);
 		if (structures_modified) {
 			_rebuild_chunk_mesh(chunk);
 		} else {
